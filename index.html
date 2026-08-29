@@ -127,6 +127,8 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 .check.warn{background:var(--amber-wash);color:#7A4A00}
 .check.warn .tag{background:var(--amber);color:#fff}
 .check.ok{background:var(--good-wash);color:var(--good)}
+.check.info{background:#F1F3F5;color:var(--steel)}
+.check.info .tag{background:var(--steel);color:#fff}
 .check.ok .tag{background:var(--good);color:#fff}
 
 /* ---------- Tally ---------- */
@@ -187,10 +189,26 @@ input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;paddin
 .hint{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.4}
 .empty{text-align:center;color:var(--mute);padding:22px 10px;font-size:14px}
 
+table.diag{width:100%;border-collapse:collapse;font-size:13px}
+table.diag td{padding:6px 0;border-bottom:1px solid #EEF0F2;font-family:var(--mono);font-size:12px}
+table.diag td:first-child{color:var(--mute);width:38%;font-family:var(--body);font-size:13px}
+.log{margin-top:9px;padding:8px 9px;background:#F7F8F9;border-radius:7px;
+  font-family:var(--mono);font-size:10.5px;line-height:1.6;color:var(--steel);
+  max-height:150px;overflow:auto}
+.stamp{text-align:center;font-family:var(--mono);font-size:10px;color:#A8AFB7;
+  letter-spacing:.06em;padding:6px 0 0}
+
 /* ---------- Print sheet ---------- */
 #print{display:none}
 @media print{
   @page{size:landscape;margin:.3in}
+  /* iOS Safari ignores the @page size descriptor. When the preview comes out
+     portrait, body.rot turns the sheet sideways so it still reads landscape. */
+  body.rot .psheet{
+    position:absolute;top:0;left:7.9in;
+    width:10.4in;height:7.9in;
+    transform:rotate(90deg);transform-origin:0 0;
+  }
   body{background:#fff}
   .top,.tabs,.wrap,.noprint{display:none!important}
   #print{display:block!important}
@@ -200,8 +218,8 @@ input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;paddin
   .phead h1{font-family:var(--disp);font-weight:700;font-size:22pt;letter-spacing:.04em;
     text-transform:uppercase;margin:0}
   .phead .meta{margin-left:auto;font-size:10pt;text-align:right;line-height:1.3}
-  .pcols{display:flex;gap:10px;align-items:flex-start}
-  table.pgrid{border-collapse:collapse;flex:1}
+  .pcols{display:flex;gap:12px;align-items:flex-start}
+  table.pgrid{border-collapse:collapse;flex:1 1 auto}
   table.pgrid th,table.pgrid td{border:1px solid #666;padding:3px 4px;font-size:10.5pt;
     text-align:center;white-space:nowrap}
   table.pgrid th{background:#E6E7E9;font-family:var(--disp);font-weight:700;font-size:11pt;
@@ -209,7 +227,7 @@ input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;paddin
   table.pgrid td.pos{background:#F0F1F2;font-family:var(--disp);font-weight:700;
     font-size:11.5pt;text-align:left;letter-spacing:.03em}
   table.pgrid tr.pbench td{font-size:9.5pt;font-style:italic;background:#FAFAFA}
-  table.pbat{border-collapse:collapse;width:1%}
+  table.pbat{border-collapse:collapse;flex:0 0 auto;width:auto}
   table.pbat th{border:1px solid #666;background:#C8102E;color:#fff;font-family:var(--disp);
     font-size:11pt;letter-spacing:.05em;padding:3px 8px;text-transform:uppercase}
   table.pbat td{border:1px solid #666;padding:2.5px 8px;font-size:10.5pt;white-space:nowrap}
@@ -234,6 +252,7 @@ input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;paddin
 
 <div class="tabs" id="tabs"></div>
 <div class="wrap" id="view"></div>
+<div class="stamp noprint" id="stamp"></div>
 
 <div id="print"></div>
 
@@ -253,6 +272,10 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
+const BUILD  = "2026-08-29.0514";
+const SCHEMA = 1;
+
+/* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
 
 /* ---------------- Constants ---------------- */
 const POS = [
@@ -301,24 +324,6 @@ function seedGame(){
 
 /* ---------------- State ---------------- */
 let S = { roster:[], games:[], cur:null };
-let tab = "lineup";
-let remote = null;   // firebase handles when connected
-
-/* ---------------- Storage ---------------- */
-const LS = "warriors_lineup_v1";
-function saveLocal(){
-  try{ localStorage.setItem(LS, JSON.stringify({roster:S.roster,games:S.games})); }catch(e){}
-}
-function loadLocal(){
-  try{
-    const raw = localStorage.getItem(LS);
-    if(!raw) return false;
-    const d = JSON.parse(raw);
-    if(!d || !Array.isArray(d.roster)) return false;
-    S.roster = d.roster; S.games = d.games||[];
-    return true;
-  }catch(e){ return false; }
-}
 
 /* ---------------- Helpers ---------------- */
 const byId = id => S.roster.find(p=>p.id===id);
@@ -416,35 +421,101 @@ function runChecks(){
   const prev=priorGames()[0];
   const pt=prev?tallyGame(prev):null;
 
-  const bench2=[], bench2b2=[], of3=[], samePos=[];
+  /* With 11 players over 6 innings there are 12 bench slots, so somebody has to
+     sit twice no matter how you arrange it. Warn only when a kid sits MORE than
+     the roster forces; report the forced case as information, not a problem. */
+  const benchTotal = Math.max(0, n - FIELD_N) * g.innings;
+  const share = n ? Math.ceil(benchTotal / n) : 0;
+
+  const overBench=[], atBench=[], bench2b2=[], of3=[], samePos=[];
   pres.forEach(p=>{
     const r=t[p.id]; if(!r) return;
-    if(r.BN>=2) bench2.push(p.name);
-    if(r.BN>=2 && pt && pt[p.id] && pt[p.id].BN>=2) bench2b2.push(p.name);
-    if(r.OF>=3) of3.push(p.name);
-    for(const k in r.pos) if(r.pos[k]>=3) samePos.push(`${p.name} at ${k} ×${r.pos[k]}`);
+    if(r.BN > share) overBench.push(p.name);
+    else if(r.BN >= 2 && r.BN === share) atBench.push(p.name);
+    if(r.BN >= 2 && pt && pt[p.id] && pt[p.id].BN >= 2) bench2b2.push(p.name);
+    if(r.OF >= 3) of3.push(p.name);
+    for(const k in r.pos) if(r.pos[k] >= 3) samePos.push(`${p.name} at ${k} \u00d7${r.pos[k]}`);
   });
-  if(bench2b2.length) out.push({lv:"warn",tag:"SAT 2×2",msg:`Sitting twice for a second straight game: ${bench2b2.join(", ")}.`});
-  const only2 = bench2.filter(n=>!bench2b2.includes(n));
-  if(only2.length) out.push({lv:"warn",tag:"BENCH 2",msg:`On the bench twice today: ${only2.join(", ")}.`});
-  if(of3.length) out.push({lv:"warn",tag:"OF 3+",msg:`Three or more innings in the outfield: ${of3.join(", ")}.`});
-  if(samePos.length) out.push({lv:"warn",tag:"SAME POS",msg:"Same spot three or more innings — "+samePos.join(" · ")});
 
-  if(!out.length) out.push({lv:"ok",tag:"SET",msg:`Card is clean. ${n} players, ${g.innings} innings, every spot covered.`});
+  if(overBench.length) out.push({lv:"warn",tag:"BENCH "+(share+1)+"+",
+    msg:`Sitting more than a fair share (${share} each with ${n} in): ${overBench.join(", ")}.`});
+  if(bench2b2.length) out.push({lv:"warn",tag:"SAT 2\u00d72",
+    msg:`Sat twice last game and again today: ${bench2b2.join(", ")}. Start them next time.`});
+  if(atBench.length && !bench2b2.length) out.push({lv:"info",tag:"SITS "+share,
+    msg:`${n} players means someone sits ${share}\u00d7. Today it's ${atBench.join(", ")}.`});
+  if(of3.length) out.push({lv:"warn",tag:"OF 3+",
+    msg:`Three or more innings in the outfield: ${of3.join(", ")}.`});
+  if(samePos.length) out.push({lv:"warn",tag:"SAME POS",
+    msg:"Same spot three or more innings \u2014 "+samePos.join(" \u00b7 ")});
+
+  if(!out.some(c=>c.lv==="err"||c.lv==="warn"))
+    out.push({lv:"ok",tag:"SET",msg:`Card is clean. ${n} players, ${g.innings} innings, every spot covered.`});
   return out;
 }
 const errCount = () => runChecks().filter(c=>c.lv==="err").length;
 
-/* ---------------- Mutations ---------------- */
-function commit(patch){
-  saveLocal();
-  if(remote && patch) remote.push(patch);
-  render();
+/* ==== LOGIC:END ==== */
+
+let tab = "lineup";
+
+/* ---------------- Local cache (mirror of the server, never the source of truth) --- */
+const LS = "warriors_lineup_v1";
+function saveLocal(){
+  try{ localStorage.setItem(LS, JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games})); }
+  catch(e){ note("cache write failed: "+codeOf(e)); }
 }
+function loadLocal(){
+  try{
+    const raw = localStorage.getItem(LS);
+    if(!raw) return false;
+    const d = JSON.parse(raw);
+    if(!d || !Array.isArray(d.roster)) return false;
+    if((d.schema||0) !== SCHEMA){ note("cache written under schema "+(d.schema||0)+", ignored"); return false; }
+    S.roster = d.roster; S.games = d.games||[];
+    return true;
+  }catch(e){ note("cache read failed: "+codeOf(e)); return false; }
+}
+
+/* ---------------- Sync status ----------------
+   Rule learned the hard way on the EI app: never report a bare "offline".
+   Every failure carries a code, and the Game tab shows the last one. */
+const SYNC = { mode:"local", detail:"this device only", pending:0, lastAt:null, lastErr:null, log:[] };
+const codeOf = e => (e && (e.code || e.name)) || "unknown";
+function note(msg){
+  SYNC.log.unshift(new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit",second:"2-digit"})+"  "+msg);
+  SYNC.log = SYNC.log.slice(0,12);
+}
+function setSync(mode, detail, err){
+  SYNC.mode = mode;
+  if(detail !== undefined) SYNC.detail = detail;
+  if(err){ SYNC.lastErr = codeOf(err)+": "+(err.message||""); note(detail+" — "+SYNC.lastErr); }
+  paintSync();
+}
+function paintSync(){
+  const a=document.getElementById("syncState"), b=document.getElementById("syncNote");
+  if(!a) return;
+  a.textContent = {local:"Local",connecting:"Linking",live:"Live",error:"Error"}[SYNC.mode] || SYNC.mode;
+  a.style.color = SYNC.mode==="error" ? "#FF8A93" : SYNC.mode==="live" ? "#fff" : "#C9CFD6";
+  let d = SYNC.detail;
+  if(SYNC.mode==="live"){
+    d = SYNC.pending ? SYNC.pending+" saving…"
+      : SYNC.lastAt ? new Date(SYNC.lastAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})
+      : "connected";
+  }
+  b.textContent = d;
+}
+
+/* ---------------- Mutations ----------------
+   Each edit writes only the field it touched. Two coaches editing different
+   cells in the same inning both survive; a whole-document write would have
+   let the slower phone erase the faster one. */
+function commit(){ saveLocal(); render(); }
+
 function setSlot(i,p,val){
   const g=game(); const k=key(i,p);
   if(val) g.slots[k]=val; else delete g.slots[k];
-  commit({type:"slot",gid:g.id,k,val:val||null});
+  commit();
+  writeGameField(g.id, "slots."+k, val || DELETE);
 }
 function toggleOut(id){
   const g=game(); g.out=g.out||[];
@@ -456,13 +527,15 @@ function toggleOut(id){
     g.order=g.order.filter(x=>x!==id);
     Object.keys(g.slots).forEach(k=>{ if(g.slots[k]===id) delete g.slots[k]; });
   }
-  commit({type:"game",gid:g.id});
+  commit();
+  writeGame(g);
 }
 function moveBat(id,dir){
   const g=game(), o=g.order, i=o.indexOf(id), j=i+dir;
   if(i<0||j<0||j>=o.length) return;
   [o[i],o[j]]=[o[j],o[i]];
-  commit({type:"game",gid:g.id});
+  commit();
+  writeGameField(g.id, "order", o.slice());
 }
 
 /* ---------------- Render ---------------- */
@@ -475,6 +548,8 @@ function render(){
     lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, game:viewGame
   }[tab])(g);
   renderPrint();
+  const st=document.getElementById("stamp");
+  if(st) st.textContent="BUILD "+BUILD+"  ·  SCHEMA "+SCHEMA;
 }
 
 function renderTabs(){
@@ -545,22 +620,26 @@ function viewLineup(g){
 
   <div class="card">
     <div class="h">This game <span class="rule"></span></div>
-    ${tallyTable(tallyGame(g), pres, g.innings)}
+    ${tallyTable(tallyGame(g), pres, g.innings, Math.ceil(Math.max(0,pres.length-FIELD_N)*g.innings/Math.max(1,pres.length)))}
   </div>
 
   <div class="card noprint">
+    <div class="h">Print <span class="rule"></span></div>
     <div class="row">
-      <button class="btn primary" onclick="window.print()">Print card</button>
+      <button class="btn primary" id="printNormal">Print card</button>
+      <button class="btn" id="printRot">Print sideways</button>
     </div>
-    <div class="hint">On iPhone: tap Print, then set Orientation to Landscape in the preview.</div>
+    <div class="hint">Tap <b>Print card</b> and set Landscape in the preview. If the preview
+      is stuck in portrait, back out and use <b>Print sideways</b> — it turns the sheet on the
+      page so it still reads landscape.</div>
   </div>`;
 }
 
-function tallyTable(t, people, innTotal){
+function tallyTable(t, people, innTotal, share){
   const rows = people.map(p=>{
     const r=t[p.id]||{INF:0,OF:0,BN:0};
     const w=n=>n?Math.max(6,n*11):0;
-    const flag = r.BN>=2 || r.OF>=3;
+    const flag = r.BN>share || r.OF>=3;
     return `<tr class="${flag?"flag":""}">
       <td class="l">${esc(p.name)}</td>
       <td class="${r.INF?"":"z"}">${r.INF}</td>
@@ -697,9 +776,21 @@ function viewGame(g){
     <div class="hint">Copy carries the roster and batting order forward with an empty defense.</div>
   </div>
   <div class="card">
-    <div class="h">Sharing <span class="rule"></span></div>
-    <div class="sub" id="shareState"></div>
-    <div class="hint">Without a Firebase config this card lives on this phone only. With one, you and your co-coach see the same card as you edit.</div>
+    <div class="h">Sync <span class="rule"></span></div>
+    <table class="diag">
+      <tr><td>Connection</td><td>${SYNC.mode}${SYNC.pending?" · "+SYNC.pending+" saving":""}</td></tr>
+      <tr><td>Last save</td><td>${SYNC.lastAt?new Date(SYNC.lastAt).toLocaleTimeString():"never"}</td></tr>
+      <tr><td>Last error</td><td>${SYNC.lastErr?esc(SYNC.lastErr):"none"}</td></tr>
+      <tr><td>Build</td><td>${BUILD}</td></tr>
+      <tr><td>Schema</td><td>${SCHEMA}</td></tr>
+      <tr><td>Team</td><td>${TEAM_ID}</td></tr>
+    </table>
+    ${SYNC.log.length?`<div class="log">${SYNC.log.map(l=>esc(l)).join("<br>")}</div>`:""}
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="copyDiag">Copy diagnostics</button>
+      <button class="btn ghost" id="pushAll">Re-send everything</button>
+    </div>
+    <div class="hint">If sync ever misbehaves, copy this and send it to me — the error code is what identifies the cause.</div>
   </div>`;
 }
 
@@ -741,12 +832,14 @@ document.addEventListener("change",e=>{
   const t=e.target;
   if(t.matches("td.cell select")) setSlot(+t.dataset.i, t.dataset.p, t.value);
   else if(t.id==="gamePick"){ S.cur=t.value; saveCur(); render(); }
-  else if(t.id==="gDate"){ game().date=t.value; reorderGames(); commit({type:"game",gid:game().id}); }
-  else if(t.id==="gInn"){ game().innings=+t.value; commit({type:"game",gid:game().id}); }
+  else if(t.id==="gDate"){ game().date=t.value; reorderGames(); commit();
+    writeGameField(game().id,"date",game().date); refreshPicker(); }
+  else if(t.id==="gInn"){ game().innings=+t.value; commit();
+    writeGameField(game().id,"innings",game().innings); }
 });
 document.addEventListener("input",e=>{
   if(e.target.id==="gOpp"){ game().opp=e.target.value; saveLocal(); renderPrint();
-    if(remote) remote.push({type:"game",gid:game().id}); refreshPicker(); }
+    writeGameField(game().id,"opp",game().opp); refreshPicker(); }
 });
 document.addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b) return;
@@ -760,7 +853,7 @@ document.addEventListener("click",e=>{
     if(!nm) return;
     const id=pid(nm)+(S.roster.some(p=>p.id===pid(nm))?"_"+Date.now().toString(36).slice(-3):"");
     S.roster.push({id,name:nm}); el.value="";
-    commit({type:"roster"});
+    commit(); writeRoster();
   }
   else if(b.dataset.remove){
     const id=b.dataset.remove;
@@ -771,10 +864,28 @@ document.addEventListener("click",e=>{
       g.out=(g.out||[]).filter(x=>x!==id);
       Object.keys(g.slots).forEach(k=>{ if(g.slots[k]===id) delete g.slots[k]; });
     });
-    commit({type:"all"});
+    commit(); writeRoster(); S.games.forEach(writeGame);
   }
   else if(b.id==="incCur"){
     document.body.dataset.incCur = document.body.dataset.incCur==="1"?"0":"1"; render();
+  }
+  else if(b.id==="printNormal"){ document.body.classList.remove("rot"); window.print(); }
+  else if(b.id==="printRot"){
+    document.body.classList.add("rot");
+    window.print();
+    setTimeout(()=>document.body.classList.remove("rot"),1500);
+  }
+  else if(b.id==="copyDiag"){
+    const txt=["Warriors lineup diagnostics","build "+BUILD+" · schema "+SCHEMA+" · team "+TEAM_ID,
+      "connection "+SYNC.mode+" · pending "+SYNC.pending,
+      "last save "+(SYNC.lastAt?new Date(SYNC.lastAt).toISOString():"never"),
+      "last error "+(SYNC.lastErr||"none"),"",...SYNC.log].join("\n");
+    (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).
+      then(()=>alert("Copied.")).catch(()=>prompt("Copy this:",txt));
+  }
+  else if(b.id==="pushAll"){
+    if(!ready){ alert("Not connected to the database yet."); return; }
+    writeRoster(); S.games.forEach(writeGame); note("manual re-send");
   }
   else if(b.id==="dupGame") newGame(game());
   else if(b.id==="delGame"){
@@ -782,7 +893,7 @@ document.addEventListener("click",e=>{
     if(!confirm("Delete the "+fmtDate(g.date)+" game?")) return;
     S.games=S.games.filter(x=>x.id!==g.id);
     S.cur=(S.games[S.games.length-1]||{}).id||null;
-    commit({type:"all"});
+    commit(); removeGame(g.id);
     refreshPicker();
   }
 });
@@ -795,10 +906,12 @@ function newGame(from){
     order:from?[...(from.order||[])]:S.roster.map(p=>p.id),
     slots:{}, done:false, created:Date.now() };
   S.games.push(g); S.cur=id; tab="lineup";
-  saveCur(); commit({type:"all"}); refreshPicker();
+  saveCur(); commit(); writeGame(g); refreshPicker();
 }
 function reorderGames(){ S.games.sort((a,b)=>(a.date||"").localeCompare(b.date||"")); }
 function saveCur(){ try{ localStorage.setItem(LS+"_cur",S.cur||""); }catch(e){} }
+function copyGame(g){ return {id:g.id,date:g.date||"",opp:g.opp||"",innings:g.innings||6,
+  out:[...(g.out||[])],order:[...(g.order||[])],slots:{...(g.slots||{})},created:g.created||Date.now()}; }
 
 function refreshPicker(){
   const sel=document.getElementById("gamePick");
@@ -808,49 +921,100 @@ function refreshPicker(){
   ).join("") || `<option>No games</option>`;
 }
 
-/* ---------------- Firebase (optional) ---------------- */
+/* ---------------- Firestore ----------------
+   Shape:  teams/{TEAM_ID}                -> { schema, roster:[...] }
+           teams/{TEAM_ID}/games/{gameId} -> { date, opp, innings, out, order, slots:{...} }
+   `slots` is a map, not an array, so a single cell can be written by field
+   path and merged with a co-coach's simultaneous edit to a different cell. */
+
+const DELETE = Symbol("delete-field");
+let FS=null, DB=null, teamRef=null, gamesRef=null;
+let ready=false;              // true only after the server has spoken
+let sawTeam=false, sawGames=false;
+
 async function connect(){
-  if(!FIREBASE_CONFIG) return;
+  if(!FIREBASE_CONFIG){ setSync("local","this device only"); return; }
+  setSync("connecting","opening database");
   try{
-    const [{initializeApp},fs] = await Promise.all([
+    const [{initializeApp}, fs] = await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js")
     ]);
-    const app=initializeApp(FIREBASE_CONFIG);
-    const db=fs.getFirestore(app);
-    const teamRef=fs.doc(db,"teams",TEAM_ID);
+    FS=fs; DB=fs.getFirestore(initializeApp(FIREBASE_CONFIG));
+    teamRef  = fs.doc(DB,"teams",TEAM_ID);
+    gamesRef = fs.collection(DB,"teams",TEAM_ID,"games");
 
-    setSync("Live","syncing…");
-    fs.onSnapshot(teamRef,snap=>{
+    fs.onSnapshot(teamRef, snap=>{
+      sawTeam=true;
       const d=snap.data();
-      if(d && d.state){
-        const incoming=JSON.parse(d.state);
-        S.roster=incoming.roster; S.games=incoming.games;
-        if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
-        saveLocal(); refreshPicker(); render();
-      }
-      setSync("Live", new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}));
-    },err=>{ setSync("Offline","reconnecting"); console.warn(err); });
+      if(d && Array.isArray(d.roster) && d.roster.length) S.roster=d.roster;
+      arrive(snap.exists());
+    }, err=>setSync("error","team read failed", err));
 
-    let timer=null;
-    remote={ push(){
-      clearTimeout(timer);
-      timer=setTimeout(()=>{
-        fs.setDoc(teamRef,{state:JSON.stringify({roster:S.roster,games:S.games}),
-          at:Date.now()},{merge:true}).catch(e=>setSync("Offline","retrying"));
-      },400);
-    }};
-  }catch(e){ setSync("Local","sync failed"); console.warn(e); }
+    fs.onSnapshot(gamesRef, snap=>{
+      sawGames=true;
+      if(!snap.empty){
+        S.games = snap.docs.map(d=>Object.assign({id:d.id},d.data()));
+        reorderGames();
+        if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
+      }
+      arrive(null);
+    }, err=>setSync("error","games read failed", err));
+
+  }catch(e){ setSync("error","could not load Firebase", e); }
 }
-function setSync(a,b){
-  document.getElementById("syncState").textContent=a;
-  document.getElementById("syncNote").textContent=b;
+
+/* Seeding is non-destructive: the built-in roster and the 8/22 card are only
+   written when the team document does not exist yet. An app update never
+   overwrites what is already on the server. */
+function arrive(teamExists){
+  if(!(sawTeam && sawGames)) return;
+  const first = !ready;
+  ready = true;
+  if(first && teamExists===false){
+    note("empty database — seeding roster and 8/22 card");
+    writeRoster();
+    S.games.forEach(writeGame);
+  }
+  SYNC.lastAt=Date.now();
+  setSync("live");
+  saveLocal(); refreshPicker(); render();
+}
+
+function track(promise, what){
+  SYNC.pending++; paintSync();
+  return promise.then(()=>{
+    SYNC.pending--; SYNC.lastAt=Date.now();
+    if(SYNC.mode!=="error") setSync("live");
+    else paintSync();
+  }).catch(e=>{
+    SYNC.pending--;
+    setSync("error", what+" write failed", e);
+  });
+}
+
+function writeRoster(){
+  if(!DB || !ready) return;
+  track(FS.setDoc(teamRef,{schema:SCHEMA,roster:S.roster,at:Date.now()},{merge:true}),"roster");
+}
+function writeGame(g){
+  if(!DB || !ready) return;
+  track(FS.setDoc(FS.doc(gamesRef,g.id), copyGame(g)),"game");
+}
+function writeGameField(gid, path, val){
+  if(!DB || !ready) return;
+  const v = val===DELETE ? FS.deleteField() : val;
+  track(FS.updateDoc(FS.doc(gamesRef,gid), {[path]:v}),"cell");
+}
+function removeGame(gid){
+  if(!DB || !ready) return;
+  track(FS.deleteDoc(FS.doc(gamesRef,gid)),"delete");
 }
 
 /* ---------------- Boot ---------------- */
 (function init(){
   if(!loadLocal()){
-    S.roster=SEED_ROSTER;
+    S.roster=SEED_ROSTER.map(p=>({...p}));
     S.games=[seedGame()];
   }
   try{ S.cur=localStorage.getItem(LS+"_cur")||null; }catch(e){}
