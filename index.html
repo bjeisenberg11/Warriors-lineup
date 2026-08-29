@@ -120,6 +120,23 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
   line-height:1.25;min-width:96px}
 .benchnames.none{color:var(--mute)}
 
+/* ---------- Landscape split ----------
+   Turned sideways, the phone has room for the tally beside the grid, which is
+   exactly when you want both: you are setting positions and watching counts. */
+.rotatehint{font-size:12px;color:var(--mute);margin-top:9px;padding-top:9px;
+  border-top:1px dashed var(--fog);line-height:1.4}
+@media (orientation:landscape) and (max-height:620px){
+  .wrap{max-width:none;padding:10px}
+  .split{display:flex;gap:12px;align-items:flex-start}
+  .splitmain{flex:1 1 auto;min-width:0}
+  .splitside{flex:0 0 288px;position:sticky;top:10px;
+    max-height:calc(100vh - 120px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .splitside .card{margin-bottom:10px}
+  .rotatehint{display:none}
+  .top{padding-top:6px;padding-bottom:6px}
+  .brand{font-size:19px}
+}
+
 /* ---------- Checks ---------- */
 .check{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;
   margin-bottom:6px;font-size:14px;line-height:1.35}
@@ -198,6 +215,16 @@ textarea.t{resize:vertical}
 .btn.danger{color:var(--red-deep);border-color:#F0C6CC}
 .hint{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.4}
 .empty{text-align:center;color:var(--mute);padding:22px 10px;font-size:14px}
+
+.note{border:1px solid var(--fog);border-left:3px solid var(--steel);border-radius:9px;
+  padding:9px 11px;margin-bottom:8px;background:#fff}
+.note.mine{border-left-color:var(--red);background:#FFFCFC}
+.nmeta{font-size:11px;color:var(--mute);font-family:var(--mono);letter-spacing:.04em;
+  margin-bottom:4px;display:flex;gap:6px;align-items:baseline}
+.nmeta b{color:var(--ink);font-family:var(--body);font-size:13px;letter-spacing:0}
+.nmeta span{margin-left:auto}
+.ntext{font-size:15px;line-height:1.4;white-space:pre-wrap;word-break:break-word}
+.ndel{font-size:11px;color:var(--mute);padding:6px 0 0;letter-spacing:.04em;text-transform:uppercase}
 
 table.diag{width:100%;border-collapse:collapse;font-size:13px}
 table.diag td{padding:6px 0;border-bottom:1px solid #EEF0F2;font-family:var(--mono);font-size:12px}
@@ -285,7 +312,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1321";
+const BUILD  = "2026-08-29.1327";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -336,7 +363,9 @@ function seedGame(){
 }
 
 /* ---------------- State ---------------- */
-let S = { roster:[], games:[], cur:null };
+let S = { roster:[], games:[], notes:[], cur:null };
+let ME = null;                 // "Blake" or "Ryan" — per device, no accounts
+let notesSeen = 0;
 
 /* ---------------- Helpers ---------------- */
 const byId = id => S.roster.find(p=>p.id===id);
@@ -531,7 +560,7 @@ let tab = "lineup";
 /* ---------------- Local cache (mirror of the server, never the source of truth) --- */
 const LS = "warriors_lineup_v1";
 function saveLocal(){
-  try{ localStorage.setItem(LS, JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games})); }
+  try{ localStorage.setItem(LS, JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games,notes:S.notes})); }
   catch(e){ note("cache write failed: "+codeOf(e)); }
 }
 function loadLocal(){
@@ -541,7 +570,7 @@ function loadLocal(){
     const d = JSON.parse(raw);
     if(!d || !Array.isArray(d.roster)) return false;
     if((d.schema||0) !== SCHEMA){ note("cache written under schema "+(d.schema||0)+", ignored"); return false; }
-    S.roster = d.roster; S.games = d.games||[];
+    S.roster = d.roster; S.games = d.games||[]; S.notes = d.notes||[];
     return true;
   }catch(e){ note("cache read failed: "+codeOf(e)); return false; }
 }
@@ -610,6 +639,46 @@ function moveBat(id,dir){
   writeGameField(g.id, "order", o.slice());
 }
 
+/* ---------------- Notes ----------------
+   Two coaches, no accounts. Each device says who it is once; that name is
+   stamped on anything written from it. */
+const COACHES = ["Blake","Ryan"];
+function loadMe(){
+  try{ ME = localStorage.getItem(LS+"_me") || null; }catch(e){ ME=null; }
+  try{ notesSeen = +(localStorage.getItem(LS+"_seen")||0); }catch(e){ notesSeen=0; }
+}
+function setMe(who){
+  ME = who;
+  try{ localStorage.setItem(LS+"_me", who); }catch(e){}
+  render();
+}
+function markNotesRead(){
+  notesSeen = Date.now();
+  try{ localStorage.setItem(LS+"_seen", String(notesSeen)); }catch(e){}
+}
+const sortedNotes = () => [...(S.notes||[])].sort((a,b)=>(b.at||0)-(a.at||0));
+const unreadNotes = () => (S.notes||[]).filter(n=>(n.at||0) > notesSeen && n.who !== ME).length;
+
+function addNote(text){
+  const n = { id:"n_"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+              who: ME || "Coach", text: String(text).trim(), at: Date.now(),
+              game: S.cur || "" };
+  if(!n.text) return;
+  S.notes = [n, ...(S.notes||[])];
+  markNotesRead(); commit(); writeNote(n);
+}
+function dropNote(id){
+  S.notes = (S.notes||[]).filter(n=>n.id!==id);
+  commit(); removeNote(id);
+}
+const whenStr = ms => {
+  if(!ms) return "";
+  const d=new Date(ms), now=new Date();
+  const sameDay = d.toDateString()===now.toDateString();
+  const t=d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+  return sameDay ? t : d.toLocaleDateString([],{month:"numeric",day:"numeric"})+" "+t;
+};
+
 /* ---------------- Render ---------------- */
 function render(){
   renderTabs();
@@ -617,7 +686,7 @@ function render(){
   const v=document.getElementById("view");
   if(!g){ v.innerHTML=`<div class="card"><div class="empty">No game yet. Tap <b>+ Game</b> to start a card.</div></div>`; return; }
   v.innerHTML = ({
-    lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, game:viewGame
+    lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, notes:viewNotes, game:viewGame
   }[tab])(g);
   renderPrint();
   const st=document.getElementById("stamp");
@@ -631,6 +700,7 @@ function renderTabs(){
     ["who","Who's In",0],
     ["bat","Batting",0],
     ["trends","Trends",0],
+    ["notes","Notes",unreadNotes()],
     ["game","Game",0]
   ];
   document.getElementById("tabs").innerHTML = items.map(([k,l,b])=>
@@ -671,6 +741,8 @@ function viewLineup(g){
     `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
 
   return `
+  <div class="split">
+  <div class="splitmain">
   <div class="card">
     <div class="h">Defense <span class="rule"></span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${pres.length} IN · ${g.innings} INN</span></div>
@@ -683,16 +755,23 @@ function viewLineup(g){
         </tbody>
       </table>
     </div>
+    <div class="rotatehint">Turn the phone sideways and the tally moves alongside the grid,
+      so you can watch the counts while you set positions.</div>
   </div>
 
   <div class="card">
     <div class="h">Checks <span class="rule"></span></div>
     ${checks}
   </div>
+  </div>
 
+  <aside class="splitside">
   <div class="card">
     <div class="h">This game <span class="rule"></span></div>
     ${tallyTable(tallyGame(g), pres, g.innings, Math.ceil(Math.max(0,pres.length-FIELD_N)*g.innings/Math.max(1,pres.length)))}
+  </div>
+
+  </aside>
   </div>
 
   <div class="card noprint">
@@ -823,6 +902,46 @@ function viewTrends(g){
   </div>`;
 }
 
+/* --- Notes --- */
+function viewNotes(){
+  if(!ME){
+    return `<div class="card">
+      <div class="h">Who are you? <span class="rule"></span></div>
+      <div class="sub">Asked once on this phone, so notes get the right name on them.</div>
+      <div class="row">${COACHES.map(c=>
+        `<button class="btn primary" data-me="${c}" style="flex:1">${c}</button>`).join("")}</div>
+    </div>`;
+  }
+  const list = sortedNotes();
+  const items = list.map(n=>{
+    const mine = n.who===ME;
+    const g = S.games.find(x=>x.id===n.game);
+    return `<div class="note ${mine?"mine":""}">
+      <div class="nmeta"><b>${esc(n.who)}</b>${g?" · "+fmtDate(g.date):""}
+        <span>${whenStr(n.at)}</span></div>
+      <div class="ntext">${esc(n.text)}</div>
+      ${mine?`<button class="ndel" data-delnote="${n.id}">Delete</button>`:""}
+    </div>`;
+  }).join("");
+
+  return `<div class="card">
+    <div class="h">Notes <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${esc(ME)}</span></div>
+    <div class="sub">Shared with the other coach. Whatever you write shows up on their phone.</div>
+    <textarea class="t" id="noteText" rows="3"
+      placeholder="Ryder's arm was sore — keep him off the mound Saturday"></textarea>
+    <div class="row" style="margin-top:9px">
+      <button class="btn primary" id="notePost">Post note</button>
+      <button class="btn ghost" data-me="" style="flex:0 0 auto">Not ${esc(ME)}?</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h">Thread <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${list.length}</span></div>
+    ${items || `<div class="empty">Nothing yet. First note goes at the top.</div>`}
+  </div>`;
+}
+
 /* --- Game settings --- */
 function viewGame(g){
   return `<div class="card">
@@ -949,7 +1068,11 @@ document.addEventListener("click",e=>{
     if(c){ c.scrollIntoView({behavior:"smooth",block:"center"}); c.classList.add("pulse");
            setTimeout(()=>c.classList.remove("pulse"),1400); }
   }
-  else if(b.dataset.tab){ tab=b.dataset.tab; render(); }
+  else if(b.dataset.tab){
+    tab=b.dataset.tab;
+    if(tab==="notes") markNotesRead();
+    render();
+  }
   else if(b.id==="newGame") newGame();
   else if(b.dataset.toggle) toggleOut(b.dataset.toggle);
   else if(b.dataset.up) moveBat(b.dataset.up,-1);
@@ -974,6 +1097,17 @@ document.addEventListener("click",e=>{
   }
   else if(b.id==="incCur"){
     document.body.dataset.incCur = document.body.dataset.incCur==="1"?"0":"1"; render();
+  }
+  else if(b.dataset.me !== undefined){ setMe(b.dataset.me || null); }
+  else if(b.id==="notePost"){
+    const el=document.getElementById("noteText");
+    const v=(el.value||"").trim();
+    if(!v) return;
+    el.value="";
+    addNote(v);
+  }
+  else if(b.dataset.delnote){
+    if(confirm("Delete this note?")) dropNote(b.dataset.delnote);
   }
   else if(b.id==="printNormal"){ document.body.classList.remove("rot"); window.print(); }
   else if(b.id==="printRot"){
@@ -1066,6 +1200,7 @@ let FS=null, DB=null, teamRef=null, gamesRef=null;
 let ready=false;              // true only after the server has spoken
 let sawTeam=false, sawGames=false;
 let teamExists=null, teamHasRoster=false, serverGames=0;
+let notesRef=null;
 
 async function connect(){
   if(!FIREBASE_CONFIG){ setSync("local","this device only"); return; }
@@ -1078,6 +1213,7 @@ async function connect(){
     FS=fs; DB=fs.getFirestore(initializeApp(FIREBASE_CONFIG));
     teamRef  = fs.doc(DB,"teams",TEAM_ID);
     gamesRef = fs.collection(DB,"teams",TEAM_ID,"games");
+    notesRef = fs.collection(DB,"teams",TEAM_ID,"notes");
 
     fs.onSnapshot(teamRef, snap=>{
       sawTeam=true; teamExists=snap.exists();
@@ -1108,6 +1244,14 @@ async function connect(){
       if(codeOf(err)==="permission-denied")
         note("rules must cover teams/"+TEAM_ID+"/games/** , not just the team document");
     });
+
+    // Notes are their own stream: a notes failure must not stall the lineup,
+    // and lineup readiness must not gate the thread.
+    fs.onSnapshot(notesRef, snap=>{
+      S.notes = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+      saveLocal();
+      if(tab==="notes" || unreadNotes()) render();
+    }, err=>setSync("error","notes read failed", err));
 
   }catch(e){ setSync("error","could not load Firebase", e); }
 }
@@ -1166,6 +1310,14 @@ function writeGameField(gid, path, val){
     return FS.setDoc(ref, copyGame(g));   // patch had nothing to patch; create it
   }),"cell");
 }
+function writeNote(n){
+  if(!DB || !ready) return;
+  track(FS.setDoc(FS.doc(notesRef,n.id), {who:n.who,text:n.text,at:n.at,game:n.game||""}),"note");
+}
+function removeNote(id){
+  if(!DB || !ready) return;
+  track(FS.deleteDoc(FS.doc(notesRef,id)),"note delete");
+}
 function removeGame(gid){
   if(!DB || !ready) return;
   track(FS.deleteDoc(FS.doc(gamesRef,gid)),"delete");
@@ -1173,6 +1325,7 @@ function removeGame(gid){
 
 /* ---------------- Boot ---------------- */
 (function init(){
+  loadMe();
   if(!loadLocal()){
     S.roster=SEED_ROSTER.map(p=>({...p}));
     S.games=[seedGame()];
