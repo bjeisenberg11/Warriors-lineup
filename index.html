@@ -331,7 +331,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1417";
+const BUILD  = "2026-08-29.1418";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -511,9 +511,9 @@ function runChecks(){
   if(overBench.length) out.push({lv:"warn",tag:"BENCH "+(share+1)+"+",
     msg:`Sitting more than a fair share (${share} each with ${n} in): ${overBench.join(", ")}.`});
   if(bench2b2.length) out.push({lv:"warn",tag:"SAT 2\u00d72",
-    msg:`Sat twice last game and again today: ${bench2b2.join(", ")}. Start them next time.`});
+    msg:`Sat twice last game and again today: ${bench2b2.join(", ")}. Move the second sit to someone who hasn't had one.`});
   if(prevSat.length) out.push({lv:"info",tag:"LAST GAME",
-    msg:`Sat twice on ${fmtDate(prev.date)}: ${prevSat.join(", ")}. Worth a full ${g.innings} today.`});
+    msg:`Sat twice on ${fmtDate(prev.date)}: ${prevSat.join(", ")}. Someone has to sit twice today \u2014 make it someone else.`});
   if(atBench.length && !bench2b2.length) out.push({lv:"info",tag:"SITS "+share,
     msg:`${n} players means someone sits ${share}\u00d7. Today it's ${atBench.join(", ")}.`});
   if(of3.length) out.push({lv:"warn",tag:"OF 3+",
