@@ -160,6 +160,10 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 .check.warn .tag{background:var(--amber);color:#fff}
 .check.ok{background:var(--good-wash);color:var(--good)}
 .check.info{background:#F1F3F5;color:var(--steel)}
+.check.note-flag{background:var(--ink);color:#fff;width:100%;text-align:left;
+  font-family:var(--body);align-items:center}
+.check.note-flag .tag{background:var(--red);color:#fff}
+.check.note-flag:active{opacity:.85}
 .check.info .tag{background:var(--steel);color:#fff}
 .check.ok .tag{background:var(--good);color:#fff}
 
@@ -327,7 +331,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1408";
+const BUILD  = "2026-08-29.1417";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -494,10 +498,22 @@ function runChecks(){
     for(const k in r.pos) if(r.pos[k] >= 3) samePos.push(`${p.name} at ${k} \u00d7${r.pos[k]}`);
   });
 
+  // Who drew the short straw last time is the thing you want in front of you
+  // while building today's card, not only after you have repeated it.
+  const prevSat = [];
+  if(prev && pt){
+    pres.forEach(p=>{
+      const r = pt[p.id];
+      if(r && r.BN >= 2 && !bench2b2.includes(p.name)) prevSat.push(p.name);
+    });
+  }
+
   if(overBench.length) out.push({lv:"warn",tag:"BENCH "+(share+1)+"+",
     msg:`Sitting more than a fair share (${share} each with ${n} in): ${overBench.join(", ")}.`});
   if(bench2b2.length) out.push({lv:"warn",tag:"SAT 2\u00d72",
     msg:`Sat twice last game and again today: ${bench2b2.join(", ")}. Start them next time.`});
+  if(prevSat.length) out.push({lv:"info",tag:"LAST GAME",
+    msg:`Sat twice on ${fmtDate(prev.date)}: ${prevSat.join(", ")}. Worth a full ${g.innings} today.`});
   if(atBench.length && !bench2b2.length) out.push({lv:"info",tag:"SITS "+share,
     msg:`${n} players means someone sits ${share}\u00d7. Today it's ${atBench.join(", ")}.`});
   if(of3.length) out.push({lv:"warn",tag:"OF 3+",
@@ -816,7 +832,12 @@ function viewLineup(g){
     return `<td class="benchnames ${b.length?"":"none"}">${b.length?b.map(x=>esc(x.name)).join("<br>"):"—"}</td>`;
   }).join("");
 
-  const checks = runChecks().map(c=>
+  const unread = unreadNotes();
+  const noteFlag = unread ? `<button class="check note-flag" data-tab="notes">
+      <span class="tag">${unread} NEW</span>
+      <span>${unread===1?"A note you haven't read":"Notes you haven't read"} from the other coach. Tap to open.</span>
+    </button>` : "";
+  const checks = noteFlag + runChecks().map(c=>
     `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
 
   return `
