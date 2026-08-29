@@ -388,7 +388,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1437";
+const BUILD  = "2026-08-29.1442";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -948,13 +948,16 @@ function viewLineup(g){
 
   <div class="card noprint">
     <div class="h">Game day <span class="rule"></span></div>
+    <div class="sub">Full-screen batting order and field chart for the iPad.</div>
     <div class="row">
       <button class="btn primary" id="openDisplay">Open display</button>
+      <button class="btn" id="shareDisplay">Send link</button>
     </div>
-    <div class="hint">Full-screen batting order and field chart for the iPad. Open
-      <b>${location.origin+location.pathname}#display</b> on the tablet and leave it there —
-      it follows every change you or Ryan make. Tap the arrows to move the inning along
-      and everyone's screen moves with it.</div>
+    <div class="hint"><b>On the iPad:</b> open this app and tap Open display, then use
+      Share \u2192 Add to Home Screen while it's showing. The crest icon then goes straight
+      to the display, and you never type a URL again.<br><br>
+      It follows every change you or Ryan make, and the inning arrows move everyone's
+      screen at once.</div>
   </div>
 
   <div class="card noprint">
@@ -1324,6 +1327,8 @@ document.addEventListener("visibilitychange", ()=>{
   if(displayMode && document.visibilityState==="visible" && !wakeLock) holdScreen(true);
 });
 
+const displayURL = () => location.origin + location.pathname + "#display";
+
 function applyRoute(){
   displayMode = location.hash === "#display";
   document.body.classList.toggle("display-on", displayMode);
@@ -1442,6 +1447,15 @@ document.addEventListener("click",e=>{
   else if(b.id==="dPrev") setInning(liveInning(game())-1);
   else if(b.id==="dNext") setInning(liveInning(game())+1);
   else if(b.id==="openDisplay"){ location.hash="#display"; }
+  else if(b.id==="shareDisplay"){
+    const url = displayURL();
+    if(navigator.share){
+      navigator.share({title:"Warriors game-day display", url}).catch(()=>{});
+    } else if(navigator.clipboard){
+      navigator.clipboard.writeText(url).then(()=>alert("Link copied.")).
+        catch(()=>prompt("Copy this link:", url));
+    } else prompt("Copy this link:", url);
+  }
   else if(b.id==="printNormal") doPrint(false);
   else if(b.id==="printRot") doPrint(true);
   else if(b.id==="impPreview" || b.id==="impGo"){
