@@ -34,7 +34,9 @@ body{
   padding-bottom:env(safe-area-inset-bottom);
   -webkit-text-size-adjust:100%;
 }
-button,select,input{font-family:inherit;font-size:16px;color:inherit}
+/* 16px is the threshold: iOS zooms the page on focus for anything smaller,
+   so every focusable field must sit at or above it. */
+button,select,input,textarea{font-family:inherit;font-size:16px;color:inherit}
 button{cursor:pointer;border:none;background:none}
 :focus-visible{outline:2px solid var(--red);outline-offset:2px}
 
@@ -206,7 +208,7 @@ input[type="date"].t{-webkit-appearance:none;appearance:none;height:40px;line-he
 select.t{-webkit-appearance:none;appearance:none;padding-right:26px;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7'><path d='M1 1l4 4 4-4' stroke='%238B939C' stroke-width='1.6' fill='none'/></svg>");
   background-repeat:no-repeat;background-position:right 10px center}
-textarea.t{resize:vertical}
+textarea.t{resize:vertical;font-size:16px;line-height:1.4}
 .btn{border:1px solid var(--fog);background:#fff;border-radius:8px;padding:10px 13px;
   font-family:var(--disp);font-weight:600;font-size:15px;letter-spacing:.05em;
   text-transform:uppercase;color:var(--ink)}
@@ -312,7 +314,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1332";
+const BUILD  = "2026-08-29.1334";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1038,7 +1040,7 @@ function viewGame(g){
       <div><label class="f">Innings</label><select class="t" id="impInn">${[4,5,6,7].map(n=>
         `<option value="${n}" ${n===6?"selected":""}>${n}</option>`).join("")}</select></div>
     </div>
-    <textarea class="t" id="impText" rows="5" style="margin-top:9px;font-family:var(--mono);font-size:12px"
+    <textarea class="t" id="impText" rows="5" style="margin-top:9px;font-family:var(--mono)"
       placeholder="1B,Blake,Leo,Max O,Micah,Dawson,Micah&#10;2B,Huddy,Ryder,Cooper,Cole,Max O,Cole&#10;..."></textarea>
     <div class="row" style="margin-top:9px">
       <button class="btn" id="impPreview">Check it</button>
