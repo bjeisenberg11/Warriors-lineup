@@ -278,7 +278,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.0514";
+const BUILD  = "2026-08-29.1314";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -459,6 +459,63 @@ function runChecks(){
   return out;
 }
 const errCount = () => runChecks().filter(c=>c.lv==="err").length;
+
+/* ---------------- Import ----------------
+   Tolerant of the spreadsheet's real shape: a position code somewhere in the
+   row, then one name per inning. Extra columns (batting numbers, the repeated
+   position label, the tally columns) are skipped rather than fought with. */
+const normName = s => String(s).toLowerCase().replace(/[^a-z0-9]/g,"");
+
+function parseLineup(text, innCount){
+  const idByName = {};
+  S.roster.forEach(p=>{ idByName[normName(p.name)] = p.id; });
+
+  const slots={}, unknown=new Set(), seen={};
+  let order=[];
+
+  String(text).split(/\r?\n/).forEach(line=>{
+    const cells = line.split(/[,\t]/).map(c=>c.trim().replace(/^"|"$/g,""));
+
+    // batting order: a row number followed by a known player name
+    if(/^\d{1,2}$/.test(cells[0]||"") && cells[1]){
+      const id = idByName[normName(cells[1])];
+      if(id && !order.includes(id)) order.push(id);
+    }
+
+    const at = cells.findIndex(c=>POSK.includes(c.toUpperCase()));
+    if(at < 0) return;
+    const pos = cells[at].toUpperCase();
+    if(seen[pos]) return;
+
+    const names=[];
+    for(let i=at+1; i<cells.length && names.length<innCount; i++){
+      const c=cells[i];
+      if(c==="") { if(names.length) break; continue; }
+      if(/^\d+$/.test(c)) break;                       // tally columns
+      if(POSK.includes(c.toUpperCase())) break;         // repeated label
+      names.push(c);
+    }
+    if(!names.length) return;
+    seen[pos]=1;
+    names.forEach((nm,idx)=>{
+      const id = idByName[normName(nm)];
+      if(id) slots[key(idx+1,pos)] = id; else unknown.add(nm);
+    });
+  });
+
+  // anyone who never takes the field is treated as absent, not benched all game
+  const appeared = new Set(Object.values(slots));
+  const out = S.roster.filter(p=>!appeared.has(p.id)).map(p=>p.id);
+  order = order.filter(id=>!out.includes(id));
+
+  return {
+    slots, out, order,
+    positions: Object.keys(seen).length,
+    filled: Object.keys(slots).length,
+    expected: POSK.length * innCount,
+    unknown: [...unknown]
+  };
+}
 
 /* ==== LOGIC:END ==== */
 
@@ -783,6 +840,22 @@ function viewGame(g){
     </div>
     <div class="hint">Copy carries the roster and batting order forward with an empty defense.</div>
   </div>
+  <div class="card">
+    <div class="h">Import a past game <span class="rule"></span></div>
+    <div class="sub">Paste rows from your spreadsheet — position code, then one name per inning.</div>
+    <div class="row">
+      <div><label class="f">Date</label><input class="t" type="date" id="impDate"></div>
+      <div><label class="f">Innings</label><select class="t" id="impInn">${[4,5,6,7].map(n=>
+        `<option value="${n}" ${n===6?"selected":""}>${n}</option>`).join("")}</select></div>
+    </div>
+    <textarea class="t" id="impText" rows="5" style="margin-top:9px;font-family:var(--mono);font-size:12px"
+      placeholder="1B,Blake,Leo,Max O,Micah,Dawson,Micah&#10;2B,Huddy,Ryder,Cooper,Cole,Max O,Cole&#10;..."></textarea>
+    <div class="row" style="margin-top:9px">
+      <button class="btn" id="impPreview">Check it</button>
+      <button class="btn primary" id="impGo">Import</button>
+    </div>
+    <div id="impOut"></div>
+  </div>
   <div class="card" id="syncCard">
     <div class="h">Sync <span class="rule"></span></div>
     ${FIREBASE_CONFIG && !ready ? `<div class="check err" style="margin-bottom:9px">
@@ -892,6 +965,34 @@ document.addEventListener("click",e=>{
     window.print();
     setTimeout(()=>document.body.classList.remove("rot"),1500);
   }
+  else if(b.id==="impPreview" || b.id==="impGo"){
+    const txt=(document.getElementById("impText").value||"").trim();
+    const innCount=+document.getElementById("impInn").value;
+    const when=document.getElementById("impDate").value;
+    const out=document.getElementById("impOut");
+    if(!txt){ out.innerHTML=`<div class="check err"><span class="tag">EMPTY</span><span>Nothing pasted yet.</span></div>`; return; }
+    const r=parseLineup(txt,innCount);
+    const lines=[];
+    lines.push(`<div class="check ${r.filled===r.expected?"ok":"warn"}"><span class="tag">${r.filled}/${r.expected}</span>
+      <span>Read ${r.positions} positions across ${innCount} innings.</span></div>`);
+    if(r.unknown.length) lines.push(`<div class="check err"><span class="tag">NO MATCH</span>
+      <span>Not on the roster: ${esc(r.unknown.join(", "))}. Add them under Who's In, then import again.</span></div>`);
+    if(r.out.length) lines.push(`<div class="check info"><span class="tag">OUT</span>
+      <span>Never took the field, so marked missing: ${esc(r.out.map(nameOf).join(", "))}.</span></div>`);
+    out.innerHTML=lines.join("");
+    if(b.id==="impGo"){
+      if(!when){ out.innerHTML+=`<div class="check err"><span class="tag">DATE</span><span>Set the date first — trends are ordered by it.</span></div>`; return; }
+      if(r.unknown.length) return;
+      const id="g_"+when.replace(/-/g,"");
+      if(S.games.some(g=>g.id===id) && !confirm("A game on "+fmtDate(when)+" already exists. Replace it?")) return;
+      S.games=S.games.filter(g=>g.id!==id);
+      const g={id,date:when,opp:"",innings:innCount,out:r.out,
+        order:r.order.length?r.order:S.roster.filter(p=>!r.out.includes(p.id)).map(p=>p.id),
+        slots:r.slots,created:Date.parse(when)};
+      S.games.push(g); reorderGames(); S.cur=id; tab="lineup";
+      saveCur(); commit(); writeGame(g); refreshPicker();
+    }
+  }
   else if(b.id==="copyDiag"){
     const txt=["Warriors lineup diagnostics","build "+BUILD+" · schema "+SCHEMA+" · team "+TEAM_ID,
       "connection "+SYNC.mode+" · pending "+SYNC.pending,
@@ -948,6 +1049,7 @@ const DELETE = Symbol("delete-field");
 let FS=null, DB=null, teamRef=null, gamesRef=null;
 let ready=false;              // true only after the server has spoken
 let sawTeam=false, sawGames=false;
+let teamExists=null, teamHasRoster=false, serverGames=0;
 
 async function connect(){
   if(!FIREBASE_CONFIG){ setSync("local","this device only"); return; }
@@ -962,20 +1064,29 @@ async function connect(){
     gamesRef = fs.collection(DB,"teams",TEAM_ID,"games");
 
     fs.onSnapshot(teamRef, snap=>{
-      sawTeam=true;
+      sawTeam=true; teamExists=snap.exists();
       const d=snap.data();
-      if(d && Array.isArray(d.roster) && d.roster.length) S.roster=d.roster;
-      arrive(snap.exists());
+      if(d && Array.isArray(d.roster) && d.roster.length){ S.roster=d.roster; teamHasRoster=true; }
+      else if(d && typeof d.state==="string"){
+        // migration from the original single-document format
+        try{
+          const old=JSON.parse(d.state);
+          if(old.roster && old.roster.length) S.roster=old.roster;
+          if(old.games && old.games.length) S.games=old.games;
+          note("migrated "+(old.games||[]).length+" game(s) from the old single-document format");
+        }catch(e){ note("old-format data unreadable: "+codeOf(e)); }
+      }
+      arrive();
     }, err=>setSync("error","team read failed", err));
 
     fs.onSnapshot(gamesRef, snap=>{
-      sawGames=true;
+      sawGames=true; serverGames=snap.size;
       if(!snap.empty){
         S.games = snap.docs.map(d=>Object.assign({id:d.id},d.data()));
         reorderGames();
         if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
       }
-      arrive(null);
+      arrive();
     }, err=>{
       setSync("error","games read failed", err);
       if(codeOf(err)==="permission-denied")
@@ -988,14 +1099,19 @@ async function connect(){
 /* Seeding is non-destructive: the built-in roster and the 8/22 card are only
    written when the team document does not exist yet. An app update never
    overwrites what is already on the server. */
-function arrive(teamExists){
+function arrive(){
   if(!(sawTeam && sawGames)) return;
   const first = !ready;
   ready = true;
-  if(first && teamExists===false){
-    note("empty database — seeding roster and 8/22 card");
-    writeRoster();
-    S.games.forEach(writeGame);
+  if(first){
+    // Seed or backfill: the guard is "the server is missing this", not merely
+    // "the team document is absent" — an older schema left the doc in place
+    // with no games under it, and cell writes then had nothing to patch.
+    if(!teamHasRoster){ note("no roster on the server — uploading it"); writeRoster(); }
+    if(serverGames===0 && S.games.length){
+      note("no games on the server — uploading "+S.games.length);
+      S.games.forEach(writeGame);
+    }
   }
   SYNC.lastAt=Date.now();
   setSync("live");
@@ -1025,7 +1141,14 @@ function writeGame(g){
 function writeGameField(gid, path, val){
   if(!DB || !ready) return;
   const v = val===DELETE ? FS.deleteField() : val;
-  track(FS.updateDoc(FS.doc(gamesRef,gid), {[path]:v}),"cell");
+  const ref = FS.doc(gamesRef,gid);
+  track(FS.updateDoc(ref,{[path]:v}).catch(e=>{
+    if(codeOf(e)!=="not-found") throw e;
+    const g = S.games.find(x=>x.id===gid);
+    if(!g) throw e;
+    note("game "+gid+" was missing on the server — uploading the whole card");
+    return FS.setDoc(ref, copyGame(g));   // patch had nothing to patch; create it
+  }),"cell");
 }
 function removeGame(gid){
   if(!DB || !ready) return;
