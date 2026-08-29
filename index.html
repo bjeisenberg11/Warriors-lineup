@@ -244,13 +244,14 @@ table.diag td:first-child{color:var(--mute);width:38%;font-family:var(--body);fo
 #print{display:none}
 @media print{
   @page{size:landscape;margin:.3in}
-  /* iOS Safari ignores the @page size descriptor. When the preview comes out
-     portrait, body.rot turns the sheet sideways so it still reads landscape. */
-  body.rot .psheet{
-    position:absolute;top:0;left:7.9in;
-    width:10.4in;height:7.9in;
-    transform:rotate(90deg);transform-origin:0 0;
-  }
+  /* The rule above is the default for print started from the browser's own
+     menu. fitPrint injects a later @page that overrides it when rotating, so
+     orientation always agrees
+     with whether the sheet is being rotated. Geometry is measured, never
+     assumed: a hard-coded page size overflowed and sliced off the batting
+     column on the co-coach's phone. */
+  .psheet{transform-origin:0 0}
+  body.rot .psheet{position:absolute;top:0;left:0}
   body{background:#fff}
   .top,.tabs,.wrap,.noprint{display:none!important}
   #print{display:block!important}
@@ -314,7 +315,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1334";
+const BUILD  = "2026-08-29.1354";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1070,6 +1071,57 @@ function viewGame(g){
   </div>`;
 }
 
+/* --- Printing ---------------------------------------------------------
+   The sheet is laid out at the printable page size, measured, then scaled
+   down if it overruns. Nothing is assumed to fit. Letter and A4 differ, and
+   Safari's margins are its own business, so we take the smaller of the two
+   printable widths and let the scale absorb the rest. */
+const PAGE = { long: 10.0*96, short: 7.5*96 };   // conservative printable area, px @96dpi
+
+function fitPrint(rot){
+  const sheet = document.querySelector("#print .psheet");
+  if(!sheet) return;
+  document.body.classList.toggle("rot", rot);
+
+  // orientation must agree with whether we are turning the sheet
+  let st = document.getElementById("pageRule");
+  if(!st){ st=document.createElement("style"); st.id="pageRule"; document.head.appendChild(st); }
+  st.textContent = "@page{size:"+(rot?"portrait":"landscape")+";margin:.3in}";
+
+  // lay out at the landscape shape either way, then measure
+  sheet.style.transform = "none";
+  sheet.style.width  = PAGE.long+"px";
+  sheet.style.height = "auto";
+  const w = Math.max(sheet.scrollWidth, PAGE.long);
+  const h = sheet.scrollHeight;
+  const scale = Math.min(1, PAGE.long / w, PAGE.short / h);
+
+  // Transforms apply right to left: scale, then rotate, then translate. After a
+  // 90deg turn the sheet occupies x from -(h*scale) to 0, so shift right by
+  // exactly that to sit flush against the left edge of the page.
+  sheet.style.transform = rot
+    ? "translate("+(h*scale)+"px,0) rotate(90deg) scale("+scale+")"
+    : "scale("+scale+")";
+}
+function clearPrint(){
+  const sheet=document.querySelector("#print .psheet");
+  if(sheet){ sheet.style.transform=""; sheet.style.width=""; sheet.style.height=""; }
+  document.body.classList.remove("rot");
+  const st=document.getElementById("pageRule"); if(st) st.textContent="";
+}
+function doPrint(rot){
+  renderPrint();
+  fitPrint(rot);
+  window.print();
+  setTimeout(clearPrint, 1200);
+}
+window.addEventListener("afterprint", clearPrint);
+// Printing from Safari's share sheet never touches our buttons, so fit there too.
+window.addEventListener("beforeprint", ()=>{
+  const sheet=document.querySelector("#print .psheet");
+  if(sheet && !sheet.style.transform){ renderPrint(); fitPrint(false); }
+});
+
 /* --- Print sheet --- */
 function renderPrint(){
   const g=game(); if(!g){ document.getElementById("print").innerHTML=""; return; }
@@ -1175,12 +1227,8 @@ document.addEventListener("click",e=>{
   else if(b.dataset.delnote){
     if(confirm("Delete this note?")) dropNote(b.dataset.delnote);
   }
-  else if(b.id==="printNormal"){ document.body.classList.remove("rot"); window.print(); }
-  else if(b.id==="printRot"){
-    document.body.classList.add("rot");
-    window.print();
-    setTimeout(()=>document.body.classList.remove("rot"),1500);
-  }
+  else if(b.id==="printNormal") doPrint(false);
+  else if(b.id==="printRot") doPrint(true);
   else if(b.id==="impPreview" || b.id==="impGo"){
     const txt=(document.getElementById("impText").value||"").trim();
     const innCount=+document.getElementById("impInn").value;
