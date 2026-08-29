@@ -50,7 +50,10 @@ button{cursor:pointer;border:none;background:none}
   text-transform:uppercase;line-height:1}
 .brand span{color:#B8BEC6;font-weight:500}
 .status{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.08em;
-  text-transform:uppercase;color:#9AA2AB;text-align:right;line-height:1.3}
+  text-transform:uppercase;color:#9AA2AB;text-align:right;line-height:1.3;
+  border:1px solid transparent;border-radius:7px;padding:4px 7px}
+.status:active{background:#31353C}
+.status.err{border-color:#7A2A33;background:#3A2226}
 .status b{display:block;color:#fff;font-weight:500}
 
 .gamebar{display:flex;gap:8px;align-items:center;margin-top:9px}
@@ -192,6 +195,9 @@ input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;paddin
 table.diag{width:100%;border-collapse:collapse;font-size:13px}
 table.diag td{padding:6px 0;border-bottom:1px solid #EEF0F2;font-family:var(--mono);font-size:12px}
 table.diag td:first-child{color:var(--mute);width:38%;font-family:var(--body);font-size:13px}
+.pulse{animation:pulse 1.4s ease-out}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(200,16,46,.45)}100%{box-shadow:0 0 0 14px rgba(200,16,46,0)}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none;border-color:var(--red)}}
 .log{margin-top:9px;padding:8px 9px;background:#F7F8F9;border-radius:7px;
   font-family:var(--mono);font-size:10.5px;line-height:1.6;color:var(--steel);
   max-height:150px;overflow:auto}
@@ -242,7 +248,7 @@ table.diag td:first-child{color:var(--mute);width:38%;font-family:var(--body);fo
   <div class="brandrow">
     <div class="slash"></div>
     <div class="brand">Deerfield 9U <span>Warriors</span></div>
-    <div class="status"><b id="syncState">Local</b><span id="syncNote">this device</span></div>
+    <button class="status" id="syncBtn" aria-label="Connection details"><b id="syncState">Local</b><span id="syncNote">this device</span></button>
   </div>
   <div class="gamebar">
     <select id="gamePick" aria-label="Choose game"></select>
@@ -496,6 +502,8 @@ function paintSync(){
   if(!a) return;
   a.textContent = {local:"Local",connecting:"Linking",live:"Live",error:"Error"}[SYNC.mode] || SYNC.mode;
   a.style.color = SYNC.mode==="error" ? "#FF8A93" : SYNC.mode==="live" ? "#fff" : "#C9CFD6";
+  const btn=document.getElementById("syncBtn");
+  if(btn) btn.classList.toggle("err", SYNC.mode==="error");
   let d = SYNC.detail;
   if(SYNC.mode==="live"){
     d = SYNC.pending ? SYNC.pending+" saving…"
@@ -775,8 +783,11 @@ function viewGame(g){
     </div>
     <div class="hint">Copy carries the roster and batting order forward with an empty defense.</div>
   </div>
-  <div class="card">
+  <div class="card" id="syncCard">
     <div class="h">Sync <span class="rule"></span></div>
+    ${FIREBASE_CONFIG && !ready ? `<div class="check err" style="margin-bottom:9px">
+      <span class="tag">NOT SAVING</span><span>The database hasn't answered, so edits are staying on this
+      phone. Nothing is lost — they'll upload once the connection works.</span></div>` : ""}
     <table class="diag">
       <tr><td>Connection</td><td>${SYNC.mode}${SYNC.pending?" · "+SYNC.pending+" saving":""}</td></tr>
       <tr><td>Last save</td><td>${SYNC.lastAt?new Date(SYNC.lastAt).toLocaleTimeString():"never"}</td></tr>
@@ -843,7 +854,13 @@ document.addEventListener("input",e=>{
 });
 document.addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b) return;
-  if(b.dataset.tab){ tab=b.dataset.tab; render(); }
+  if(b.id==="syncBtn"){
+    tab="game"; render();
+    const c=document.getElementById("syncCard");
+    if(c){ c.scrollIntoView({behavior:"smooth",block:"center"}); c.classList.add("pulse");
+           setTimeout(()=>c.classList.remove("pulse"),1400); }
+  }
+  else if(b.dataset.tab){ tab=b.dataset.tab; render(); }
   else if(b.id==="newGame") newGame();
   else if(b.dataset.toggle) toggleOut(b.dataset.toggle);
   else if(b.dataset.up) moveBat(b.dataset.up,-1);
@@ -959,7 +976,11 @@ async function connect(){
         if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
       }
       arrive(null);
-    }, err=>setSync("error","games read failed", err));
+    }, err=>{
+      setSync("error","games read failed", err);
+      if(codeOf(err)==="permission-denied")
+        note("rules must cover teams/"+TEAM_ID+"/games/** , not just the team document");
+    });
 
   }catch(e){ setSync("error","could not load Firebase", e); }
 }
