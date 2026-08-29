@@ -312,7 +312,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1327";
+const BUILD  = "2026-08-29.1332";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -501,55 +501,119 @@ const errCount = () => runChecks().filter(c=>c.lv==="err").length;
    row, then one name per inning. Extra columns (batting numbers, the repeated
    position label, the tally columns) are skipped rather than fought with. */
 const normName = s => String(s).toLowerCase().replace(/[^a-z0-9]/g,"");
+const BENCH_WORDS = ["BENCH","BN","SIT","OUT"];
+
+function editDistance(a,b){
+  if(a===b) return 0;
+  const m=a.length, n=b.length;
+  if(!m||!n) return m||n;
+  let prev=Array.from({length:n+1},(_,j)=>j), cur=new Array(n+1);
+  for(let i=1;i<=m;i++){
+    cur[0]=i;
+    for(let j=1;j<=n;j++){
+      cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    }
+    [prev,cur]=[cur,prev];
+  }
+  return prev[n];
+}
+
+/* Sheets carry typos — "Issac" for "Isaac". Accept a near miss when exactly one
+   roster name is close, and report it so the reading can be checked rather than
+   trusted blindly. */
+function resolveName(raw, index){
+  const n = normName(raw);
+  if(!n) return {};
+  if(index.map[n]) return {id:index.map[n]};
+  let best=null, bestD=99, ties=0;
+  index.list.forEach(e=>{
+    const d = editDistance(n, e.norm);
+    if(d < bestD){ bestD=d; best=e; ties=1; }
+    else if(d === bestD) ties++;
+  });
+  const allow = n.length <= 4 ? 1 : 2;
+  if(best && bestD <= allow && ties === 1) return {id:best.id, fuzzy:best.name};
+  return {};
+}
 
 function parseLineup(text, innCount){
-  const idByName = {};
-  S.roster.forEach(p=>{ idByName[normName(p.name)] = p.id; });
+  const index = {map:{}, list:[]};
+  S.roster.forEach(p=>{
+    const n = normName(p.name);
+    index.map[n] = p.id;
+    index.list.push({id:p.id, norm:n, name:p.name});
+  });
 
-  const slots={}, unknown=new Set(), seen={};
+  const slots={}, unknown=new Set(), fuzzy=[], seen={};
+  const benched = new Set();
   let order=[];
+
+  const take = raw => {
+    const r = resolveName(raw, index);
+    if(r.fuzzy) fuzzy.push({from:raw, to:r.fuzzy});
+    if(!r.id) unknown.add(raw);
+    return r.id || null;
+  };
 
   String(text).split(/\r?\n/).forEach(line=>{
     const cells = line.split(/[,\t]/).map(c=>c.trim().replace(/^"|"$/g,""));
 
-    // batting order: a row number followed by a known player name
+    // batting order: a row number followed by a roster name
     if(/^\d{1,2}$/.test(cells[0]||"") && cells[1]){
-      const id = idByName[normName(cells[1])];
-      if(id && !order.includes(id)) order.push(id);
+      const r = resolveName(cells[1], index);
+      if(r.id && !order.includes(r.id)) order.push(r.id);
     }
 
-    const at = cells.findIndex(c=>POSK.includes(c.toUpperCase()));
+    const at = cells.findIndex(c=>
+      POSK.includes(c.toUpperCase()) || BENCH_WORDS.includes(c.toUpperCase()));
     if(at < 0) return;
-    const pos = cells[at].toUpperCase();
-    if(seen[pos]) return;
+    const label = cells[at].toUpperCase();
+    const isBench = BENCH_WORDS.includes(label);
+    if(!isBench && seen[label]) return;
 
     const names=[];
     for(let i=at+1; i<cells.length && names.length<innCount; i++){
       const c=cells[i];
       if(c==="") { if(names.length) break; continue; }
-      if(/^\d+$/.test(c)) break;                       // tally columns
-      if(POSK.includes(c.toUpperCase())) break;         // repeated label
+      if(/^\d+$/.test(c)) break;                                   // tally columns
+      if(POSK.includes(c.toUpperCase())) break;                    // repeated label
+      if(BENCH_WORDS.includes(c.toUpperCase())) break;
       names.push(c);
     }
     if(!names.length) return;
-    seen[pos]=1;
+
+    if(isBench){
+      // Bench rows are not stored — bench is derived — but they prove attendance.
+      // Without this a kid who sat every inning would be recorded as absent.
+      // They only corroborate, so anything unresolvable here is ignored rather
+      // than reported: the header row also carries a "Bench" column label.
+      names.forEach(nm=>{
+        const r = resolveName(nm, index);
+        if(!r.id) return;
+        if(r.fuzzy && !fuzzy.some(f=>f.from===nm)) fuzzy.push({from:nm, to:r.fuzzy});
+        benched.add(r.id);
+      });
+      return;
+    }
+
+    seen[label]=1;
     names.forEach((nm,idx)=>{
-      const id = idByName[normName(nm)];
-      if(id) slots[key(idx+1,pos)] = id; else unknown.add(nm);
+      const id = take(nm);
+      if(id) slots[key(idx+1,label)] = id;
     });
   });
 
-  // anyone who never takes the field is treated as absent, not benched all game
-  const appeared = new Set(Object.values(slots));
+  const appeared = new Set([...Object.values(slots), ...benched]);
   const out = S.roster.filter(p=>!appeared.has(p.id)).map(p=>p.id);
   order = order.filter(id=>!out.includes(id));
 
   return {
-    slots, out, order,
+    slots, out, order, benchOnly:[...benched].filter(id=>!Object.values(slots).includes(id)),
     positions: Object.keys(seen).length,
     filled: Object.keys(slots).length,
     expected: POSK.length * innCount,
-    unknown: [...unknown]
+    unknown: [...unknown],
+    fuzzy
   };
 }
 
@@ -1125,8 +1189,17 @@ document.addEventListener("click",e=>{
     const lines=[];
     lines.push(`<div class="check ${r.filled===r.expected?"ok":"warn"}"><span class="tag">${r.filled}/${r.expected}</span>
       <span>Read ${r.positions} positions across ${innCount} innings.</span></div>`);
+    if(r.fuzzy.length) lines.push(`<div class="check warn"><span class="tag">READ AS</span>
+      <span>${r.fuzzy.map(f=>esc(f.from)+" \u2192 "+esc(f.to)).join(", ")}. Check that's right.</span></div>`);
     if(r.unknown.length) lines.push(`<div class="check err"><span class="tag">NO MATCH</span>
       <span>Not on the roster: ${esc(r.unknown.join(", "))}. Add them under Who's In, then import again.</span></div>`);
+    lines.push(r.order.length
+      ? `<div class="check ${r.order.length>=9?"ok":"warn"}"><span class="tag">BATTING ${r.order.length}</span>
+         <span>${esc(r.order.map(nameOf).join(", "))}</span></div>`
+      : `<div class="check warn"><span class="tag">NO ORDER</span>
+         <span>No batting order found. Include the numbered name column, or set it on the Batting tab after importing.</span></div>`);
+    if(r.benchOnly.length) lines.push(`<div class="check info"><span class="tag">BENCH ONLY</span>
+      <span>Sat every inning but present: ${esc(r.benchOnly.map(nameOf).join(", "))}.</span></div>`);
     if(r.out.length) lines.push(`<div class="check info"><span class="tag">OUT</span>
       <span>Never took the field, so marked missing: ${esc(r.out.map(nameOf).join(", "))}.</span></div>`);
     out.innerHTML=lines.join("");
