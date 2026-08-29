@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Deerfield 9U Warriors — Lineup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --red:#C8102E;
+  --red-deep:#8E0B20;
+  --red-wash:#FDECEE;
+  --ink:#23262B;
+  --steel:#565D66;
+  --mute:#8B939C;
+  --fog:#DDE1E6;
+  --paper:#F3F4F6;
+  --card:#FFFFFF;
+  --amber:#B26A00;
+  --amber-wash:#FFF6E6;
+  --good:#1F7A45;
+  --good-wash:#EAF6EF;
+  --disp:"Barlow Condensed",Impact,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);color:var(--ink);font-family:var(--body);
+  font-size:16px;line-height:1.4;
+  padding-bottom:env(safe-area-inset-bottom);
+  -webkit-text-size-adjust:100%;
+}
+button,select,input{font-family:inherit;font-size:16px;color:inherit}
+button{cursor:pointer;border:none;background:none}
+:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+
+/* ---------- Header ---------- */
+.top{
+  background:var(--ink);color:#fff;
+  padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
+  position:sticky;top:0;z-index:40;
+}
+.brandrow{display:flex;align-items:center;gap:10px}
+.slash{width:6px;height:30px;background:var(--red);transform:skewX(-12deg);flex:none}
+.brand{font-family:var(--disp);font-weight:700;font-size:23px;letter-spacing:.045em;
+  text-transform:uppercase;line-height:1}
+.brand span{color:#B8BEC6;font-weight:500}
+.status{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:#9AA2AB;text-align:right;line-height:1.3}
+.status b{display:block;color:#fff;font-weight:500}
+
+.gamebar{display:flex;gap:8px;align-items:center;margin-top:9px}
+.gamebar select{
+  flex:1;min-width:0;background:#31353C;color:#fff;border:1px solid #454B54;
+  border-radius:7px;padding:8px 9px;font-size:14px;appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7'><path d='M1 1l4 4 4-4' stroke='%23AEB5BD' stroke-width='1.6' fill='none'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center;padding-right:26px;
+}
+.newbtn{background:var(--red);color:#fff;border-radius:7px;padding:8px 12px;
+  font-family:var(--disp);font-weight:600;font-size:15px;letter-spacing:.05em;
+  text-transform:uppercase;flex:none}
+
+/* ---------- Tabs ---------- */
+.tabs{display:flex;background:var(--card);border-bottom:1px solid var(--fog);
+  position:sticky;top:0;z-index:35;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1;padding:11px 12px 9px;font-family:var(--disp);font-weight:600;font-size:15px;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--mute);white-space:nowrap;
+  border-bottom:3px solid transparent}
+.tab.on{color:var(--ink);border-bottom-color:var(--red)}
+.tab .badge{display:inline-block;min-width:16px;height:16px;line-height:16px;padding:0 4px;
+  margin-left:5px;border-radius:8px;background:var(--red);color:#fff;font-family:var(--mono);
+  font-size:10px;font-weight:600;vertical-align:1px}
+
+.wrap{padding:12px 12px 40px;max-width:900px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--fog);border-radius:11px;
+  padding:13px;margin-bottom:12px}
+.h{font-family:var(--disp);font-weight:700;font-size:16px;letter-spacing:.07em;
+  text-transform:uppercase;margin:0 0 9px;display:flex;align-items:center;gap:8px}
+.h .rule{flex:1;height:1px;background:var(--fog)}
+.sub{font-size:13px;color:var(--steel);margin:-4px 0 10px}
+
+/* ---------- Grid ---------- */
+.gridscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -13px;padding:0 13px}
+table.grid{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
+table.grid th,table.grid td{padding:0;border-bottom:1px solid var(--fog)}
+.poscell{
+  position:sticky;left:0;z-index:2;background:var(--card);
+  font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.05em;
+  padding:0 9px 0 2px;text-align:left;white-space:nowrap;border-right:1px solid var(--fog);
+}
+.poscell small{display:block;font-family:var(--body);font-weight:500;font-size:9px;
+  letter-spacing:.09em;color:var(--mute);text-transform:uppercase;margin-top:-3px}
+.inhead{padding:5px 4px 6px;text-align:center;background:var(--card);
+  border-bottom:1px solid var(--fog)}
+.inhead .n{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:.05em}
+.dots{display:flex;gap:2px;justify-content:center;margin-top:3px}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--fog)}
+.dot.f{background:var(--steel)}
+.inhead.done .dot.f{background:var(--red)}
+.inhead.done .n{color:var(--red)}
+td.cell{padding:2px 3px}
+td.cell select{
+  width:100%;min-width:96px;border:1px solid var(--fog);border-radius:6px;
+  background:#fff;padding:7px 6px;font-size:14px;appearance:none;text-align:left;
+}
+td.cell select.empty{color:var(--mute);background:#FAFBFC;border-style:dashed}
+td.cell select.dup{border-color:var(--red);border-width:2px;background:var(--red-wash);
+  color:var(--red-deep);font-weight:600}
+tr.benchrow td{background:#FAFAFB}
+tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
+.benchnames{font-size:13px;color:var(--steel);padding:8px 5px;text-align:center;
+  line-height:1.25;min-width:96px}
+.benchnames.none{color:var(--mute)}
+
+/* ---------- Checks ---------- */
+.check{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;
+  margin-bottom:6px;font-size:14px;line-height:1.35}
+.check .tag{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;
+  padding:2px 5px;border-radius:4px;flex:none;margin-top:1px}
+.check.err{background:var(--red-wash);color:var(--red-deep)}
+.check.err .tag{background:var(--red);color:#fff}
+.check.warn{background:var(--amber-wash);color:#7A4A00}
+.check.warn .tag{background:var(--amber);color:#fff}
+.check.ok{background:var(--good-wash);color:var(--good)}
+.check.ok .tag{background:var(--good);color:#fff}
+
+/* ---------- Tally ---------- */
+table.tally{width:100%;border-collapse:collapse;font-size:14px}
+table.tally th{font-family:var(--body);font-weight:600;font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--mute);text-align:center;padding:0 3px 6px;
+  border-bottom:1px solid var(--fog)}
+table.tally th.l,table.tally td.l{text-align:left}
+table.tally td{padding:7px 3px;text-align:center;border-bottom:1px solid #EEF0F2;
+  font-family:var(--mono);font-size:13px}
+table.tally td.l{font-family:var(--body);font-size:14px;font-weight:500;white-space:nowrap}
+table.tally td.z{color:#C3C8CE}
+table.tally tr.flag td.l{color:var(--red-deep);font-weight:600}
+.bar{display:inline-block;height:7px;border-radius:4px;background:var(--red);vertical-align:1px}
+.bar.g{background:var(--steel)}
+.bar.m{background:var(--fog)}
+
+/* ---------- Roster ---------- */
+.plist{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.pchip{display:flex;align-items:center;gap:8px;border:1px solid var(--fog);border-radius:9px;
+  padding:9px 10px;background:#fff;text-align:left;width:100%}
+.pchip .nm{font-weight:600;font-size:15px;flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.pchip .st{font-family:var(--mono);font-size:10px;letter-spacing:.06em;padding:2px 5px;
+  border-radius:4px;flex:none}
+.pchip.in{border-color:var(--fog)}
+.pchip.in .st{background:var(--good-wash);color:var(--good)}
+.pchip.out{background:#F7F8F9;border-style:dashed}
+.pchip.out .nm{color:var(--mute);text-decoration:line-through}
+.pchip.out .st{background:var(--fog);color:var(--steel)}
+.countline{font-family:var(--mono);font-size:12px;color:var(--steel);margin-bottom:9px}
+
+/* ---------- Batting ---------- */
+.bat{display:flex;align-items:center;gap:10px;border:1px solid var(--fog);border-radius:9px;
+  padding:7px 9px;margin-bottom:6px;background:#fff}
+.bat .num{font-family:var(--disp);font-weight:700;font-size:19px;color:#fff;background:var(--red);
+  width:29px;height:29px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  flex:none;transform:skewX(-8deg)}
+.bat .num i{transform:skewX(8deg);font-style:normal}
+.bat .nm{flex:1;font-weight:600;font-size:16px}
+.bat .mv{border:1px solid var(--fog);border-radius:7px;width:36px;height:34px;
+  font-size:15px;color:var(--steel);background:#fff}
+.bat .mv:disabled{opacity:.3}
+
+/* ---------- Misc controls ---------- */
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1;min-width:0}
+label.f{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mute);font-weight:600;margin-bottom:4px}
+input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;padding:9px 10px;
+  background:#fff}
+.btn{border:1px solid var(--fog);background:#fff;border-radius:8px;padding:10px 13px;
+  font-family:var(--disp);font-weight:600;font-size:15px;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--ink)}
+.btn.primary{background:var(--red);border-color:var(--red);color:#fff}
+.btn.ghost{color:var(--steel)}
+.btn.danger{color:var(--red-deep);border-color:#F0C6CC}
+.hint{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.4}
+.empty{text-align:center;color:var(--mute);padding:22px 10px;font-size:14px}
+
+/* ---------- Print sheet ---------- */
+#print{display:none}
+@media print{
+  @page{size:landscape;margin:.3in}
+  body{background:#fff}
+  .top,.tabs,.wrap,.noprint{display:none!important}
+  #print{display:block!important}
+  .psheet{font-family:var(--body);color:#000}
+  .phead{display:flex;align-items:baseline;gap:10px;border-bottom:3px solid #C8102E;
+    padding-bottom:4px;margin-bottom:7px}
+  .phead h1{font-family:var(--disp);font-weight:700;font-size:22pt;letter-spacing:.04em;
+    text-transform:uppercase;margin:0}
+  .phead .meta{margin-left:auto;font-size:10pt;text-align:right;line-height:1.3}
+  .pcols{display:flex;gap:10px;align-items:flex-start}
+  table.pgrid{border-collapse:collapse;flex:1}
+  table.pgrid th,table.pgrid td{border:1px solid #666;padding:3px 4px;font-size:10.5pt;
+    text-align:center;white-space:nowrap}
+  table.pgrid th{background:#E6E7E9;font-family:var(--disp);font-weight:700;font-size:11pt;
+    letter-spacing:.04em}
+  table.pgrid td.pos{background:#F0F1F2;font-family:var(--disp);font-weight:700;
+    font-size:11.5pt;text-align:left;letter-spacing:.03em}
+  table.pgrid tr.pbench td{font-size:9.5pt;font-style:italic;background:#FAFAFA}
+  table.pbat{border-collapse:collapse;width:1%}
+  table.pbat th{border:1px solid #666;background:#C8102E;color:#fff;font-family:var(--disp);
+    font-size:11pt;letter-spacing:.05em;padding:3px 8px;text-transform:uppercase}
+  table.pbat td{border:1px solid #666;padding:2.5px 8px;font-size:10.5pt;white-space:nowrap}
+  table.pbat td.n{font-family:var(--mono);font-weight:600;text-align:center;background:#F0F1F2}
+  .pfoot{margin-top:6px;font-size:8.5pt;color:#444;display:flex;gap:14px}
+}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brandrow">
+    <div class="slash"></div>
+    <div class="brand">Deerfield 9U <span>Warriors</span></div>
+    <div class="status"><b id="syncState">Local</b><span id="syncNote">this device</span></div>
+  </div>
+  <div class="gamebar">
+    <select id="gamePick" aria-label="Choose game"></select>
+    <button class="newbtn" id="newGame">+ Game</button>
+  </div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+<div class="wrap" id="view"></div>
+
+<div id="print"></div>
+
+<script>
+/* =========================================================================
+   DEERFIELD 9U WARRIORS — LINEUP
+   Single file. Works offline on this device by default.
+   To share live with your co-coach, paste your Firebase config below.
+   ========================================================================= */
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCoBH09Al32XqLUPjEboglD-AUHiOp6Xj8",
+  authDomain: "warriors-lineup.firebaseapp.com",
+  projectId: "warriors-lineup",
+  storageBucket: "warriors-lineup.firebasestorage.app",
+  messagingSenderId: "921716476359",
+  appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
+};
+const TEAM_ID = "warriors-k7m2q9x4";
+
+/* ---------------- Constants ---------------- */
+const POS = [
+  {k:"P",  label:"Pitcher",   grp:"INF"},
+  {k:"C",  label:"Catcher",   grp:"INF"},
+  {k:"1B", label:"First",     grp:"INF"},
+  {k:"2B", label:"Second",    grp:"INF"},
+  {k:"3B", label:"Third",     grp:"INF"},
+  {k:"SS", label:"Short",     grp:"INF"},
+  {k:"LF", label:"Left",      grp:"OF"},
+  {k:"CF", label:"Center",    grp:"OF"},
+  {k:"RF", label:"Right",     grp:"OF"}
+];
+const POSK = POS.map(p=>p.k);
+const GRP = Object.fromEntries(POS.map(p=>[p.k,p.grp]));
+const FIELD_N = POS.length;
+
+/* ---------------- Seed data ---------------- */
+const SEED_NAMES = ["Cole","Max O","Leo","Rex","Dawson","Micah","Ryder","Cooper","Owen","Huddy","Blake","Isaac"];
+const pid = n => "p_" + n.toLowerCase().replace(/[^a-z0-9]/g,"");
+
+const SEED_ROSTER = SEED_NAMES.map(n=>({id:pid(n),name:n}));
+
+// 8/22/26 lineup, transcribed from the spreadsheet. Isaac was out.
+const G822 = {
+  "1B":["Blake","Leo","Max O","Micah","Dawson","Micah"],
+  "2B":["Huddy","Ryder","Cooper","Cole","Max O","Cole"],
+  "SS":["Cooper","Rex","Rex","Ryder","Cole","Dawson"],
+  "3B":["Max O","Owen","Ryder","Rex","Cooper","Max O"],
+  "LF":["Rex","Max O","Leo","Dawson","Rex","Cooper"],
+  "CF":["Ryder","Cole","Cole","Cooper","Micah","Ryder"],
+  "RF":["Owen","Huddy","Owen","Leo","Blake","Huddy"],
+  "P" :["Micah","Micah","Blake","Blake","Owen","Owen"],
+  "C" :["Dawson","Dawson","Huddy","Huddy","Leo","Leo"]
+};
+function seedGame(){
+  const slots={};
+  for(const p in G822) G822[p].forEach((nm,i)=>{ slots["i"+(i+1)+"_"+p]=pid(nm); });
+  return {
+    id:"g_20260822", date:"2026-08-22", opp:"", innings:6,
+    out:[pid("Isaac")],
+    order:["Cole","Max O","Leo","Rex","Dawson","Micah","Ryder","Cooper","Owen","Huddy","Blake"].map(pid),
+    slots, done:true, created:Date.parse("2026-08-22")
+  };
+}
+
+/* ---------------- State ---------------- */
+let S = { roster:[], games:[], cur:null };
+let tab = "lineup";
+let remote = null;   // firebase handles when connected
+
+/* ---------------- Storage ---------------- */
+const LS = "warriors_lineup_v1";
+function saveLocal(){
+  try{ localStorage.setItem(LS, JSON.stringify({roster:S.roster,games:S.games})); }catch(e){}
+}
+function loadLocal(){
+  try{
+    const raw = localStorage.getItem(LS);
+    if(!raw) return false;
+    const d = JSON.parse(raw);
+    if(!d || !Array.isArray(d.roster)) return false;
+    S.roster = d.roster; S.games = d.games||[];
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ---------------- Helpers ---------------- */
+const byId = id => S.roster.find(p=>p.id===id);
+const nameOf = id => (byId(id)||{}).name || "?";
+const game = () => S.games.find(g=>g.id===S.cur) || null;
+const present = g => S.roster.filter(p=>!(g.out||[]).includes(p.id));
+const key = (i,p) => "i"+i+"_"+p;
+const innings = g => Array.from({length:g.innings||6},(_,i)=>i+1);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtDate = d => { if(!d) return "TBD";
+  const [y,m,day]=d.split("-"); return m.replace(/^0/,"")+"/"+day.replace(/^0/,"")+"/"+y.slice(2); };
+
+function assignedIn(g,i){
+  const map={};
+  POSK.forEach(p=>{ const v=g.slots[key(i,p)]; if(v) map[p]=v; });
+  return map;
+}
+function benchIn(g,i){
+  const used = new Set(Object.values(assignedIn(g,i)));
+  return present(g).filter(p=>!used.has(p.id));
+}
+function dupsIn(g,i){
+  const seen={}, dup=new Set();
+  POSK.forEach(p=>{ const v=g.slots[key(i,p)]; if(!v) return;
+    if(seen[v]) dup.add(v); seen[v]=1; });
+  return dup;
+}
+
+/* Per-player counts for one game */
+function tallyGame(g){
+  const t={};
+  present(g).forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{}}; });
+  innings(g).forEach(i=>{
+    const a=assignedIn(g,i);
+    POSK.forEach(p=>{
+      const v=a[p]; if(!v||!t[v]) return;
+      t[v][GRP[p]]++; t[v].pos[p]=(t[v].pos[p]||0)+1;
+    });
+    benchIn(g,i).forEach(p=>{ if(t[p.id]) t[p.id].BN++; });
+  });
+  return t;
+}
+
+/* Counts across a set of games */
+function tallyMany(list){
+  const t={};
+  S.roster.forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{},games:0}; });
+  list.forEach(g=>{
+    const one=tallyGame(g);
+    for(const id in one){
+      if(!t[id]) continue;
+      t[id].games++;
+      t[id].INF+=one[id].INF; t[id].OF+=one[id].OF; t[id].BN+=one[id].BN;
+      for(const p in one[id].pos) t[id].pos[p]=(t[id].pos[p]||0)+one[id].pos[p];
+    }
+  });
+  return t;
+}
+
+/* Prior game (chronologically before current) */
+function priorGames(){
+  const g=game(); if(!g) return [];
+  return S.games.filter(x=>x.id!==g.id && (x.created||0) < (g.created||0))
+                .sort((a,b)=>(b.created||0)-(a.created||0));
+}
+
+/* ---------------- Checks ---------------- */
+function runChecks(){
+  const g=game(); if(!g) return [];
+  const out=[], pres=present(g), n=pres.length;
+
+  if(n < FIELD_N){
+    out.push({lv:"err",tag:"SHORT",msg:`Only ${n} players in. You need ${FIELD_N} to field a full defense.`});
+  }
+
+  // per-inning integrity
+  const dupInn=[], holeInn=[];
+  innings(g).forEach(i=>{
+    const d=dupsIn(g,i);
+    if(d.size) dupInn.push(`Inn ${i}: ${[...d].map(nameOf).join(", ")}`);
+    const a=assignedIn(g,i);
+    const holes=POSK.filter(p=>!a[p]);
+    if(holes.length) holeInn.push(`Inn ${i}: ${holes.join(", ")}`);
+    // a player marked out who is still on the card
+    Object.values(a).forEach(v=>{
+      if((g.out||[]).includes(v))
+        out.push({lv:"err",tag:"OUT",msg:`${nameOf(v)} is marked missing but is still in inning ${i}.`});
+    });
+  });
+  if(dupInn.length) out.push({lv:"err",tag:"DOUBLE",msg:"Same player twice in one inning — "+dupInn.join(" · ")});
+  if(holeInn.length) out.push({lv:"err",tag:"HOLE",msg:"Position not filled — "+holeInn.join(" · ")});
+
+  // fairness
+  const t=tallyGame(g);
+  const prev=priorGames()[0];
+  const pt=prev?tallyGame(prev):null;
+
+  const bench2=[], bench2b2=[], of3=[], samePos=[];
+  pres.forEach(p=>{
+    const r=t[p.id]; if(!r) return;
+    if(r.BN>=2) bench2.push(p.name);
+    if(r.BN>=2 && pt && pt[p.id] && pt[p.id].BN>=2) bench2b2.push(p.name);
+    if(r.OF>=3) of3.push(p.name);
+    for(const k in r.pos) if(r.pos[k]>=3) samePos.push(`${p.name} at ${k} ×${r.pos[k]}`);
+  });
+  if(bench2b2.length) out.push({lv:"warn",tag:"SAT 2×2",msg:`Sitting twice for a second straight game: ${bench2b2.join(", ")}.`});
+  const only2 = bench2.filter(n=>!bench2b2.includes(n));
+  if(only2.length) out.push({lv:"warn",tag:"BENCH 2",msg:`On the bench twice today: ${only2.join(", ")}.`});
+  if(of3.length) out.push({lv:"warn",tag:"OF 3+",msg:`Three or more innings in the outfield: ${of3.join(", ")}.`});
+  if(samePos.length) out.push({lv:"warn",tag:"SAME POS",msg:"Same spot three or more innings — "+samePos.join(" · ")});
+
+  if(!out.length) out.push({lv:"ok",tag:"SET",msg:`Card is clean. ${n} players, ${g.innings} innings, every spot covered.`});
+  return out;
+}
+const errCount = () => runChecks().filter(c=>c.lv==="err").length;
+
+/* ---------------- Mutations ---------------- */
+function commit(patch){
+  saveLocal();
+  if(remote && patch) remote.push(patch);
+  render();
+}
+function setSlot(i,p,val){
+  const g=game(); const k=key(i,p);
+  if(val) g.slots[k]=val; else delete g.slots[k];
+  commit({type:"slot",gid:g.id,k,val:val||null});
+}
+function toggleOut(id){
+  const g=game(); g.out=g.out||[];
+  if(g.out.includes(id)){
+    g.out=g.out.filter(x=>x!==id);
+    if(!g.order.includes(id)) g.order.push(id);
+  }else{
+    g.out.push(id);
+    g.order=g.order.filter(x=>x!==id);
+    Object.keys(g.slots).forEach(k=>{ if(g.slots[k]===id) delete g.slots[k]; });
+  }
+  commit({type:"game",gid:g.id});
+}
+function moveBat(id,dir){
+  const g=game(), o=g.order, i=o.indexOf(id), j=i+dir;
+  if(i<0||j<0||j>=o.length) return;
+  [o[i],o[j]]=[o[j],o[i]];
+  commit({type:"game",gid:g.id});
+}
+
+/* ---------------- Render ---------------- */
+function render(){
+  renderTabs();
+  const g=game();
+  const v=document.getElementById("view");
+  if(!g){ v.innerHTML=`<div class="card"><div class="empty">No game yet. Tap <b>+ Game</b> to start a card.</div></div>`; return; }
+  v.innerHTML = ({
+    lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, game:viewGame
+  }[tab])(g);
+  renderPrint();
+}
+
+function renderTabs(){
+  const e=errCount();
+  const items=[
+    ["lineup","Lineup", e?e:0],
+    ["who","Who's In",0],
+    ["bat","Batting",0],
+    ["trends","Trends",0],
+    ["game","Game",0]
+  ];
+  document.getElementById("tabs").innerHTML = items.map(([k,l,b])=>
+    `<button class="tab ${k===tab?"on":""}" data-tab="${k}">${l}${b?`<span class="badge">${b}</span>`:""}</button>`
+  ).join("");
+}
+
+/* --- Lineup --- */
+function viewLineup(g){
+  const pres=present(g);
+  const opts = id => `<option value="">—</option>` + pres.map(p=>
+      `<option value="${p.id}" ${p.id===id?"selected":""}>${esc(p.name)}</option>`).join("");
+
+  const head = innings(g).map(i=>{
+    const filled=Object.keys(assignedIn(g,i)).length;
+    const done=filled===FIELD_N && !dupsIn(g,i).size;
+    return `<th class="inhead ${done?"done":""}"><div class="n">${i}</div>
+      <div class="dots">${Array.from({length:FIELD_N},(_,x)=>
+        `<span class="dot ${x<filled?"f":""}"></span>`).join("")}</div></th>`;
+  }).join("");
+
+  const rows = POS.map(p=>{
+    const cells = innings(g).map(i=>{
+      const val=g.slots[key(i,p.k)]||"";
+      const dup=dupsIn(g,i).has(val);
+      return `<td class="cell"><select class="${!val?"empty":""} ${dup?"dup":""}"
+        data-i="${i}" data-p="${p.k}">${opts(val)}</select></td>`;
+    }).join("");
+    return `<tr><th class="poscell">${p.k}<small>${p.label}</small></th>${cells}</tr>`;
+  }).join("");
+
+  const bench = innings(g).map(i=>{
+    const b=benchIn(g,i);
+    return `<td class="benchnames ${b.length?"":"none"}">${b.length?b.map(x=>esc(x.name)).join("<br>"):"—"}</td>`;
+  }).join("");
+
+  const checks = runChecks().map(c=>
+    `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
+
+  return `
+  <div class="card">
+    <div class="h">Defense <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${pres.length} IN · ${g.innings} INN</span></div>
+    <div class="sub">Tap a cell to set the player. Bench fills in on its own.</div>
+    <div class="gridscroll">
+      <table class="grid">
+        <thead><tr><th class="poscell" style="border-bottom:1px solid var(--fog)"></th>${head}</tr></thead>
+        <tbody>${rows}
+          <tr class="benchrow"><th class="poscell">BN<small>Bench</small></th>${bench}</tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h">Checks <span class="rule"></span></div>
+    ${checks}
+  </div>
+
+  <div class="card">
+    <div class="h">This game <span class="rule"></span></div>
+    ${tallyTable(tallyGame(g), pres, g.innings)}
+  </div>
+
+  <div class="card noprint">
+    <div class="row">
+      <button class="btn primary" onclick="window.print()">Print card</button>
+    </div>
+    <div class="hint">On iPhone: tap Print, then set Orientation to Landscape in the preview.</div>
+  </div>`;
+}
+
+function tallyTable(t, people, innTotal){
+  const rows = people.map(p=>{
+    const r=t[p.id]||{INF:0,OF:0,BN:0};
+    const w=n=>n?Math.max(6,n*11):0;
+    const flag = r.BN>=2 || r.OF>=3;
+    return `<tr class="${flag?"flag":""}">
+      <td class="l">${esc(p.name)}</td>
+      <td class="${r.INF?"":"z"}">${r.INF}</td>
+      <td class="${r.OF?"":"z"}">${r.OF}</td>
+      <td class="${r.BN?"":"z"}">${r.BN}</td>
+      <td style="text-align:left;width:40%">
+        ${r.INF?`<span class="bar" style="width:${w(r.INF)}px"></span>`:""}
+        ${r.OF?`<span class="bar g" style="width:${w(r.OF)}px"></span>`:""}
+        ${r.BN?`<span class="bar m" style="width:${w(r.BN)}px"></span>`:""}
+      </td></tr>`;
+  }).join("");
+  return `<table class="tally">
+    <thead><tr><th class="l">Player</th><th>Inf</th><th>Out</th><th>Bn</th>
+    <th class="l" style="padding-left:6px">Mix</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="hint">Pitcher and catcher count as infield. Each player has ${innTotal} innings to split.</div>`;
+}
+
+/* --- Who's In --- */
+function viewWho(g){
+  const out=g.out||[];
+  const chips = S.roster.map(p=>{
+    const isOut=out.includes(p.id);
+    return `<button class="pchip ${isOut?"out":"in"}" data-toggle="${p.id}">
+      <span class="nm">${esc(p.name)}</span>
+      <span class="st">${isOut?"OUT":"IN"}</span></button>`;
+  }).join("");
+  const n=S.roster.length-out.length;
+  return `
+  <div class="card">
+    <div class="h">Who's in <span class="rule"></span></div>
+    <div class="countline">${n} playing · ${out.length} out · ${Math.max(0,n-FIELD_N)} on the bench each inning</div>
+    <div class="plist">${chips}</div>
+    <div class="hint">Marking a player out clears them from every inning and drops them from the batting order.</div>
+  </div>
+  <div class="card">
+    <div class="h">Roster <span class="rule"></span></div>
+    <div class="row">
+      <input class="t" id="newName" placeholder="Add a player">
+      <button class="btn" id="addPlayer" style="flex:0 0 auto">Add</button>
+    </div>
+    <div class="hint" id="rmHint">Removing a player takes them off past games too. ${S.roster.map(p=>
+      `<button class="btn ghost" data-remove="${p.id}" style="padding:4px 8px;font-size:12px;margin:4px 4px 0 0">✕ ${esc(p.name)}</button>`).join("")}</div>
+  </div>`;
+}
+
+/* --- Batting --- */
+function viewBat(g){
+  const order=(g.order||[]).filter(id=>!(g.out||[]).includes(id) && byId(id));
+  present(g).forEach(p=>{ if(!order.includes(p.id)) order.push(p.id); });
+  g.order=order;
+  const rows=order.map((id,i)=>`
+    <div class="bat">
+      <div class="num"><i>${i+1}</i></div>
+      <div class="nm">${esc(nameOf(id))}</div>
+      <button class="mv" data-up="${id}" ${i===0?"disabled":""}>▲</button>
+      <button class="mv" data-down="${id}" ${i===order.length-1?"disabled":""}>▼</button>
+    </div>`).join("");
+  return `<div class="card">
+    <div class="h">Batting order <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${order.length} HITTERS</span></div>
+    <div class="sub">Everyone who's in bats, bench or not.</div>
+    ${rows||`<div class="empty">Nobody marked in yet.</div>`}
+  </div>`;
+}
+
+/* --- Trends --- */
+function viewTrends(g){
+  const prior=priorGames();
+  const inc=document.body.dataset.incCur==="1";
+  const list=inc?[...prior,g]:prior;
+  if(!list.length) return `<div class="card"><div class="empty">
+    No earlier games on file yet. Add one under <b>Game</b> to start the history.</div></div>`;
+
+  const t=tallyMany(list);
+  const cols=POSK.concat(["BN"]);
+  const rows=S.roster.map(p=>{
+    const r=t[p.id]; if(!r||!r.games) return "";
+    const tot=r.INF+r.OF+r.BN;
+    const cells=cols.map(k=>{
+      const n = k==="BN" ? r.BN : (r.pos[k]||0);
+      return `<td class="${n?"":"z"}">${n}</td>`;
+    }).join("");
+    const lowOpp = tot && (r.INF/Math.max(1,tot)) < .34;
+    return `<tr class="${lowOpp?"flag":""}"><td class="l">${esc(p.name)}</td>${cells}
+      <td style="font-weight:600">${r.INF}</td><td style="font-weight:600">${r.OF}</td></tr>`;
+  }).join("");
+
+  return `<div class="card">
+    <div class="h">Rotation history <span class="rule"></span></div>
+    <div class="sub">${list.length} game${list.length>1?"s":""} · innings by position</div>
+    <div class="gridscroll">
+      <table class="tally" style="width:max-content;min-width:100%">
+        <thead><tr><th class="l">Player</th>${cols.map(c=>`<th>${c}</th>`).join("")}
+        <th>INF</th><th>OF</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="hint">Names in red have had under a third of their innings in the infield across these games.</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="incCur">${inc?"Hide":"Include"} today's card</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h">Games counted <span class="rule"></span></div>
+    ${list.map(x=>`<div style="font-size:14px;padding:6px 0;border-bottom:1px solid #EEF0F2">
+      <b>${fmtDate(x.date)}</b> ${x.opp?"vs "+esc(x.opp):"<span style='color:var(--mute)'>no opponent</span>"}
+      ${x.id===g.id?" <span style='color:var(--red);font-size:12px'>· today</span>":""}</div>`).join("")}
+  </div>`;
+}
+
+/* --- Game settings --- */
+function viewGame(g){
+  return `<div class="card">
+    <div class="h">Game details <span class="rule"></span></div>
+    <div class="row">
+      <div><label class="f">Date</label><input class="t" type="date" id="gDate" value="${g.date||""}"></div>
+      <div><label class="f">Opponent</label><input class="t" id="gOpp" value="${esc(g.opp||"")}" placeholder="Opponent"></div>
+    </div>
+    <div class="row" style="margin-top:9px">
+      <div><label class="f">Innings</label>
+        <select class="t" id="gInn">${[4,5,6,7].map(n=>
+          `<option value="${n}" ${n===(g.innings||6)?"selected":""}>${n}</option>`).join("")}</select></div>
+      <div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h">Season <span class="rule"></span></div>
+    <div class="sub">${S.games.length} game${S.games.length===1?"":"s"} on file.</div>
+    <div class="row">
+      <button class="btn" id="dupGame">Copy to new game</button>
+      <button class="btn danger" id="delGame">Delete this game</button>
+    </div>
+    <div class="hint">Copy carries the roster and batting order forward with an empty defense.</div>
+  </div>
+  <div class="card">
+    <div class="h">Sharing <span class="rule"></span></div>
+    <div class="sub" id="shareState"></div>
+    <div class="hint">Without a Firebase config this card lives on this phone only. With one, you and your co-coach see the same card as you edit.</div>
+  </div>`;
+}
+
+/* --- Print sheet --- */
+function renderPrint(){
+  const g=game(); if(!g){ document.getElementById("print").innerHTML=""; return; }
+  const inn=innings(g);
+  const head=inn.map(i=>`<th>${i}</th>`).join("");
+  const rows=POS.map(p=>`<tr><td class="pos">${p.k}</td>${
+    inn.map(i=>`<td>${esc(nameOf(g.slots[key(i,p.k)])).replace("?","")}</td>`).join("")}</tr>`).join("");
+  const bench=`<tr class="pbench"><td class="pos">BN</td>${
+    inn.map(i=>`<td>${benchIn(g,i).map(x=>esc(x.name)).join(" / ")||"—"}</td>`).join("")}</tr>`;
+  const order=(g.order||[]).filter(id=>!(g.out||[]).includes(id));
+  const bat=order.map((id,i)=>`<tr><td class="n">${i+1}</td><td>${esc(nameOf(id))}</td></tr>`).join("");
+  const outs=(g.out||[]).map(nameOf).join(", ");
+
+  document.getElementById("print").innerHTML=`
+  <div class="psheet">
+    <div class="phead">
+      <h1>Deerfield 9U Warriors</h1>
+      <div class="meta"><b>${fmtDate(g.date)}</b>${g.opp?" &nbsp;vs "+esc(g.opp):""}<br>${order.length} players${outs?" · out: "+esc(outs):""}</div>
+    </div>
+    <div class="pcols">
+      <table class="pgrid">
+        <thead><tr><th style="text-align:left">POS</th>${head}</tr></thead>
+        <tbody>${rows}${bench}</tbody>
+      </table>
+      <table class="pbat">
+        <thead><tr><th colspan="2">Batting</th></tr></thead>
+        <tbody>${bat}</tbody>
+      </table>
+    </div>
+    <div class="pfoot"><span>P and C count as infield.</span><span>Bench rotates every inning.</span></div>
+  </div>`;
+}
+
+/* ---------------- Events ---------------- */
+document.addEventListener("change",e=>{
+  const t=e.target;
+  if(t.matches("td.cell select")) setSlot(+t.dataset.i, t.dataset.p, t.value);
+  else if(t.id==="gamePick"){ S.cur=t.value; saveCur(); render(); }
+  else if(t.id==="gDate"){ game().date=t.value; reorderGames(); commit({type:"game",gid:game().id}); }
+  else if(t.id==="gInn"){ game().innings=+t.value; commit({type:"game",gid:game().id}); }
+});
+document.addEventListener("input",e=>{
+  if(e.target.id==="gOpp"){ game().opp=e.target.value; saveLocal(); renderPrint();
+    if(remote) remote.push({type:"game",gid:game().id}); refreshPicker(); }
+});
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.tab){ tab=b.dataset.tab; render(); }
+  else if(b.id==="newGame") newGame();
+  else if(b.dataset.toggle) toggleOut(b.dataset.toggle);
+  else if(b.dataset.up) moveBat(b.dataset.up,-1);
+  else if(b.dataset.down) moveBat(b.dataset.down,1);
+  else if(b.id==="addPlayer"){
+    const el=document.getElementById("newName"), nm=(el.value||"").trim();
+    if(!nm) return;
+    const id=pid(nm)+(S.roster.some(p=>p.id===pid(nm))?"_"+Date.now().toString(36).slice(-3):"");
+    S.roster.push({id,name:nm}); el.value="";
+    commit({type:"roster"});
+  }
+  else if(b.dataset.remove){
+    const id=b.dataset.remove;
+    if(!confirm("Remove "+nameOf(id)+" from the roster?")) return;
+    S.roster=S.roster.filter(p=>p.id!==id);
+    S.games.forEach(g=>{
+      g.order=(g.order||[]).filter(x=>x!==id);
+      g.out=(g.out||[]).filter(x=>x!==id);
+      Object.keys(g.slots).forEach(k=>{ if(g.slots[k]===id) delete g.slots[k]; });
+    });
+    commit({type:"all"});
+  }
+  else if(b.id==="incCur"){
+    document.body.dataset.incCur = document.body.dataset.incCur==="1"?"0":"1"; render();
+  }
+  else if(b.id==="dupGame") newGame(game());
+  else if(b.id==="delGame"){
+    const g=game();
+    if(!confirm("Delete the "+fmtDate(g.date)+" game?")) return;
+    S.games=S.games.filter(x=>x.id!==g.id);
+    S.cur=(S.games[S.games.length-1]||{}).id||null;
+    commit({type:"all"});
+    refreshPicker();
+  }
+});
+
+function newGame(from){
+  const id="g_"+Date.now().toString(36);
+  const today=new Date().toISOString().slice(0,10);
+  const g={ id, date:today, opp:"", innings:from?from.innings:6,
+    out:from?[...(from.out||[])]:[],
+    order:from?[...(from.order||[])]:S.roster.map(p=>p.id),
+    slots:{}, done:false, created:Date.now() };
+  S.games.push(g); S.cur=id; tab="lineup";
+  saveCur(); commit({type:"all"}); refreshPicker();
+}
+function reorderGames(){ S.games.sort((a,b)=>(a.date||"").localeCompare(b.date||"")); }
+function saveCur(){ try{ localStorage.setItem(LS+"_cur",S.cur||""); }catch(e){} }
+
+function refreshPicker(){
+  const sel=document.getElementById("gamePick");
+  const sorted=[...S.games].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  sel.innerHTML=sorted.map(g=>
+    `<option value="${g.id}" ${g.id===S.cur?"selected":""}>${fmtDate(g.date)}${g.opp?" vs "+esc(g.opp):""}</option>`
+  ).join("") || `<option>No games</option>`;
+}
+
+/* ---------------- Firebase (optional) ---------------- */
+async function connect(){
+  if(!FIREBASE_CONFIG) return;
+  try{
+    const [{initializeApp},fs] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js")
+    ]);
+    const app=initializeApp(FIREBASE_CONFIG);
+    const db=fs.getFirestore(app);
+    const teamRef=fs.doc(db,"teams",TEAM_ID);
+
+    setSync("Live","syncing…");
+    fs.onSnapshot(teamRef,snap=>{
+      const d=snap.data();
+      if(d && d.state){
+        const incoming=JSON.parse(d.state);
+        S.roster=incoming.roster; S.games=incoming.games;
+        if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
+        saveLocal(); refreshPicker(); render();
+      }
+      setSync("Live", new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}));
+    },err=>{ setSync("Offline","reconnecting"); console.warn(err); });
+
+    let timer=null;
+    remote={ push(){
+      clearTimeout(timer);
+      timer=setTimeout(()=>{
+        fs.setDoc(teamRef,{state:JSON.stringify({roster:S.roster,games:S.games}),
+          at:Date.now()},{merge:true}).catch(e=>setSync("Offline","retrying"));
+      },400);
+    }};
+  }catch(e){ setSync("Local","sync failed"); console.warn(e); }
+}
+function setSync(a,b){
+  document.getElementById("syncState").textContent=a;
+  document.getElementById("syncNote").textContent=b;
+}
+
+/* ---------------- Boot ---------------- */
+(function init(){
+  if(!loadLocal()){
+    S.roster=SEED_ROSTER;
+    S.games=[seedGame()];
+  }
+  try{ S.cur=localStorage.getItem(LS+"_cur")||null; }catch(e){}
+  if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
+  reorderGames();
+  refreshPicker();
+  render();
+  connect();
+})();
+</script>
+</body>
+</html>
