@@ -178,11 +178,18 @@ table.tally tr.flag td.l{color:var(--red-deep);font-weight:600}
 
 /* ---------- Misc controls ---------- */
 .row{display:flex;gap:8px;flex-wrap:wrap}
-.row>*{flex:1;min-width:0}
+.row>*{flex:1 1 140px;min-width:0}   /* wraps to its own line rather than overlapping */
 label.f{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
   color:var(--mute);font-weight:600;margin-bottom:4px}
-input.t,select.t{width:100%;border:1px solid var(--fog);border-radius:8px;padding:9px 10px;
-  background:#fff}
+input.t,select.t,textarea.t{width:100%;max-width:100%;min-width:0;border:1px solid var(--fog);
+  border-radius:8px;padding:9px 10px;background:#fff;display:block}
+/* iOS gives date inputs an intrinsic width and ignores width:100% until the
+   native appearance is removed — without this the field overruns its column. */
+input[type="date"].t{-webkit-appearance:none;appearance:none;height:40px;line-height:20px}
+select.t{-webkit-appearance:none;appearance:none;padding-right:26px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7'><path d='M1 1l4 4 4-4' stroke='%238B939C' stroke-width='1.6' fill='none'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center}
+textarea.t{resize:vertical}
 .btn{border:1px solid var(--fog);background:#fff;border-radius:8px;padding:10px 13px;
   font-family:var(--disp);font-weight:600;font-size:15px;letter-spacing:.05em;
   text-transform:uppercase;color:var(--ink)}
@@ -278,7 +285,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-29.1314";
+const BUILD  = "2026-08-29.1321";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -921,10 +928,19 @@ document.addEventListener("change",e=>{
   else if(t.id==="gInn"){ game().innings=+t.value; commit();
     writeGameField(game().id,"innings",game().innings); }
 });
+/* While typing, only the in-memory value changes. Rewriting the picker or the
+   print sheet on every keystroke was tearing down DOM around the caret, which
+   iOS answers by closing the keyboard. Persist on commit instead. */
 document.addEventListener("input",e=>{
-  if(e.target.id==="gOpp"){ game().opp=e.target.value; saveLocal(); renderPrint();
-    writeGameField(game().id,"opp",game().opp); refreshPicker(); }
+  if(e.target.id==="gOpp"){ const g=game(); if(g) g.opp=e.target.value; }
 });
+function commitOpp(){
+  const g=game(); if(!g) return;
+  saveLocal(); renderPrint(); refreshPicker();
+  writeGameField(g.id,"opp",g.opp||"");
+}
+document.addEventListener("change",e=>{ if(e.target.id==="gOpp") commitOpp(); });
+document.addEventListener("blur",e=>{ if(e.target && e.target.id==="gOpp") commitOpp(); }, true);
 document.addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b) return;
   if(b.id==="syncBtn"){
