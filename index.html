@@ -10,8 +10,15 @@
 <meta name="apple-mobile-web-app-title" content="Warriors">
 <meta name="application-name" content="Warriors">
 <meta name="theme-color" content="#23262B">
-<!-- apple-mobile-web-app-capable is intentionally omitted: standalone mode
-     removes Safari's share sheet, and printing the lineup depends on it. -->
+<!-- Standalone mode is ON, which is what iOS requires before a web app may ask
+     for notification permission. The open question is whether window.print()
+     works from a home-screen app on current iOS; the reports of it failing are
+     from iOS 9. The Sync panel shows the launch mode so this can be tested.
+     To revert: delete the two meta tags below and set the manifest's
+     "display" back to "browser". -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -157,6 +164,13 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 }
 
 /* ---------- Checks ---------- */
+.hachip{font-family:var(--disp);font-weight:700;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;padding:2px 8px;border-radius:4px;color:#fff}
+.hachip.home{background:var(--red)}
+.hachip.away{background:var(--steel)}
+.matchup{font-size:14px;font-weight:600;color:var(--ink);margin:-4px 0 8px}
+.matchup span{font-weight:400;color:var(--steel)}
+
 .check{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;
   margin-bottom:6px;font-size:14px;line-height:1.35}
 .check .tag{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;
@@ -409,7 +423,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-30.0303";
+const BUILD  = "2026-08-30.0420";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -965,7 +979,10 @@ function viewLineup(g){
   <div class="splitmain">
   <div class="card">
     <div class="h">Defense <span class="rule"></span>
+      ${g.ha?`<span class="hachip ${isAway(g)?"away":"home"}">${isAway(g)?"Away":"Home"}</span>`:""}
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${pres.length} IN · ${g.innings} INN</span></div>
+    ${(g.opp||g.ha)?`<div class="matchup">${esc(g.opp?vsLabel(g):(isAway(g)?"Away game":"Home game"))}${
+      g.ha?` · <span>${esc(batsFirst(g))}</span>`:""}</div>`:""}
     <div class="sub">Tap a cell to set the player. Bench fills in on its own.</div>
     <div class="gridscroll">
       <table class="grid">
@@ -1237,6 +1254,7 @@ function viewGame(g){
       <tr><td>Connection</td><td>${SYNC.mode}${SYNC.pending?" · "+SYNC.pending+" saving":""}</td></tr>
       <tr><td>Last save</td><td>${SYNC.lastAt?new Date(SYNC.lastAt).toLocaleTimeString():"never"}</td></tr>
       <tr><td>Last error</td><td>${SYNC.lastErr?esc(SYNC.lastErr):"none"}</td></tr>
+      <tr><td>Launch mode</td><td>${launchMode()}</td></tr>
       <tr><td>Build</td><td>${BUILD}</td></tr>
       <tr><td>Schema</td><td>${SCHEMA}</td></tr>
       <tr><td>Team</td><td>${TEAM_ID}</td></tr>
@@ -1388,6 +1406,14 @@ document.addEventListener("visibilitychange", ()=>{
 });
 
 const displayURL = () => location.origin + location.pathname + "#display";
+
+/* Which context the app is running in. Printing and notifications behave
+   differently in each, so this is worth being able to read off the screen. */
+function launchMode(){
+  const ios = window.navigator.standalone === true;
+  const other = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
+  return (ios || other) ? "standalone (home screen)" : "browser tab";
+}
 
 function applyRoute(){
   displayMode = location.hash === "#display";

@@ -2,7 +2,8 @@
   "name": "Deerfield 9U Warriors — Lineup",
   "short_name": "Warriors",
   "start_url": "./",
-  "display": "browser",
+  "display": "standalone",
+  "orientation": "any",
   "background_color": "#F3F4F6",
   "theme_color": "#23262B",
   "icons": [
