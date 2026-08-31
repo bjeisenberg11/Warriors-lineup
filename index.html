@@ -10,12 +10,15 @@
 <meta name="apple-mobile-web-app-title" content="Warriors">
 <meta name="application-name" content="Warriors">
 <meta name="theme-color" content="#23262B">
-<!-- Standalone mode is ON, which is what iOS requires before a web app may ask
-     for notification permission. The open question is whether window.print()
-     works from a home-screen app on current iOS; the reports of it failing are
-     from iOS 9. The Sync panel shows the launch mode so this can be tested.
-     To revert: delete the two meta tags below and set the manifest's
-     "display" back to "browser". -->
+<!-- Standalone mode is ON, second attempt.
+     2026-08-30: enabled it; Print appeared to do nothing from the home-screen app.
+     Corrected: the print sheet IS created, it just does not paint until the view
+     is forced to redraw — backgrounding the app and returning brings the dialog
+     up. So this is a compositing/presentation bug, not a missing capability.
+     doPrint now forces a reflow and defers the call out of the touch handler.
+     A Safari fallback button is shown when running standalone.
+     If Print still needs the app-switcher trick, say so and this goes back to
+     "display": "browser" with the two meta tags below removed. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -423,7 +426,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-30.0420";
+const BUILD  = "2026-08-31.0238";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1031,6 +1034,9 @@ function viewLineup(g){
       <button class="btn primary" id="printNormal">Print card</button>
       <button class="btn" id="printRot">Print sideways</button>
     </div>
+    ${launchMode().startsWith("standalone")?`<div class="row" style="margin-top:8px">
+      <button class="btn ghost" id="printSafari">Didn't open? Print from Safari</button>
+    </div>`:""}
     <div class="hint">Tap <b>Print card</b> and set Landscape in the preview. If the preview
       is stuck in portrait, back out and use <b>Print sideways</b> — it turns the sheet on the
       page so it still reads landscape.</div>
@@ -1306,11 +1312,35 @@ function clearPrint(){
   document.body.classList.remove("rot");
   const st=document.getElementById("pageRule"); if(st) st.textContent="";
 }
+/* iOS standalone will build the print sheet but not present it until the view
+   is recomposited — which is why backgrounding the app and coming back makes
+   the dialog appear. Force a layout flush, let two frames land, and call print
+   from outside the touch handler. */
 function doPrint(rot){
   renderPrint();
   fitPrint(rot);
-  window.print();
-  setTimeout(clearPrint, 1200);
+
+  document.body.style.transform = "translateZ(0)";
+  void document.body.offsetHeight;               // flush layout
+  document.body.style.transform = "";
+  void document.body.offsetHeight;
+
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    setTimeout(()=>{
+      try{ window.print(); }
+      catch(e){ note("print failed: "+codeOf(e)); }
+      setTimeout(clearPrint, 1500);
+    }, 80);
+  }));
+}
+function printViaSafari(){
+  const a = document.createElement("a");
+  a.href = location.origin + location.pathname;
+  a.target = "_blank";
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 window.addEventListener("afterprint", clearPrint);
 // Printing from Safari's share sheet never touches our buttons, so fit there too.
@@ -1551,6 +1581,7 @@ document.addEventListener("click",e=>{
         catch(()=>prompt("Copy this link:", url));
     } else prompt("Copy this link:", url);
   }
+  else if(b.id==="printSafari") printViaSafari();
   else if(b.id==="printNormal") doPrint(false);
   else if(b.id==="printRot") doPrint(true);
   else if(b.id==="impPreview" || b.id==="impGo"){
