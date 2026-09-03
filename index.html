@@ -445,7 +445,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-03.0506";
+const BUILD  = "2026-09-03.1305";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -653,10 +653,50 @@ function tallyMany(list, mode){
 }
 
 /* Prior game (chronologically before current) */
+/* Deleting was permanent and Firestore keeps no history, so a game is archived
+   instead: hidden everywhere, restorable from the Game tab. */
+const archived = g => !!g.arch;
+const liveGames = () => S.games.filter(x=>!archived(x));
+
 function priorGames(){
   const g=game(); if(!g) return [];
-  return S.games.filter(x=>x.id!==g.id && (x.created||0) < (g.created||0))
-                .sort((a,b)=>(b.created||0)-(a.created||0));
+  return liveGames().filter(x=>x.id!==g.id && (x.created||0) < (g.created||0))
+                    .sort((a,b)=>(b.created||0)-(a.created||0));
+}
+
+/* ---- Season totals ----------------------------------------------------
+   Every fairness check until now looked at today or yesterday, so a kid could
+   sit twice in games 1, 3, 5 and 7 and trip nothing. This is the running
+   picture: thirds on the bench and share of infield across the season. */
+function seasonTotals(exceptId){
+  const list = liveGames().filter(x=>x.id!==exceptId);
+  const t = tallyMany(list, "live");
+  const rows = [];
+  S.roster.forEach(p=>{
+    const r = t[p.id];
+    if(!r || !r.games) return;
+    const played = r.INF + r.OF;
+    rows.push({ id:p.id, name:p.name, games:r.games,
+                INF:r.INF, OF:r.OF, BN:r.BN,
+                infShare: played ? r.INF/played : 0,
+                bnPerGame: r.games ? r.BN/r.games : 0 });
+  });
+  return rows;
+}
+/* Who is owed: most bench per game, and least infield share. */
+function seasonOwed(exceptId){
+  const rows = seasonTotals(exceptId);
+  if(rows.length < 2) return {bench:[], infield:[], rows};
+  const avgBn  = rows.reduce((a,r)=>a+r.bnPerGame,0)/rows.length;
+  const avgInf = rows.reduce((a,r)=>a+r.infShare,0)/rows.length;
+  return {
+    // a third of an inning per game over the average is not worth a mention
+    bench:   rows.filter(r=>r.bnPerGame > avgBn + 1/3)
+                 .sort((a,b)=>b.bnPerGame-a.bnPerGame),
+    infield: rows.filter(r=>r.infShare < avgInf - 0.12)
+                 .sort((a,b)=>a.infShare-b.infShare),
+    rows, avgBn, avgInf
+  };
 }
 
 /* ---------------- Checks ---------------- */
@@ -1152,7 +1192,15 @@ function viewLineup(g){
       <span class="tag">GAME DAY</span>
       <span>${liveErrs} problem${liveErrs===1?"":"s"} on the game-day card, which is the one
       that counts. Tap to open it.</span></button>` : "";
-  const checks = noteFlag + liveFlag + runChecks(checkCard).map(c=>
+  const owed = seasonOwed(g.id);
+  const owedFlag = (owed.bench.length || owed.infield.length) ? `<div class="check info">
+      <span class="tag">SEASON</span><span>${[
+        owed.bench.length   ? `Most bench so far: ${owed.bench.slice(0,3).map(r=>
+            esc(r.name)+" ("+fmtInn(r.BN)+" over "+r.games+")").join(", ")}` : "",
+        owed.infield.length ? `Least infield: ${owed.infield.slice(0,3).map(r=>
+            esc(r.name)+" ("+Math.round(r.infShare*100)+"%)").join(", ")}` : ""
+      ].filter(Boolean).join(" \u00b7 ")}</span></div>` : "";
+  const checks = noteFlag + liveFlag + owedFlag + runChecks(checkCard).map(c=>
     `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
 
   return `
@@ -1339,6 +1387,8 @@ function viewBat(g){
 }
 
 /* --- Trends --- */
+const owedAvgBn = rows => rows.length ? rows.reduce((a,r)=>a+r.bnPerGame,0)/rows.length : 0;
+
 function viewTrends(g){
   const prior=priorGames();
   const inc=document.body.dataset.incCur==="1";
@@ -1362,7 +1412,30 @@ function viewTrends(g){
       <td style="font-weight:600">${Number.isInteger(r.OF)?r.OF:fmtInn(r.OF)}</td></tr>`;
   }).join("");
 
-  return `<div class="card">
+  const season = seasonTotals(null).sort((a,b)=>b.bnPerGame-a.bnPerGame);
+  const seasonCard = season.length ? `<div class="card">
+    <div class="h">Season so far <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${
+        liveGames().length} GAME${liveGames().length===1?"":"S"}</span></div>
+    <div class="sub">Running totals. This is the one that answers who's owed.</div>
+    <table class="tally">
+      <thead><tr><th class="l">Player</th><th>G</th><th>Inf</th><th>Out</th><th>Bn</th>
+        <th>Bn/G</th><th>Inf%</th></tr></thead>
+      <tbody>${season.map(r=>`<tr class="${
+        r.bnPerGame > (owedAvgBn(season)+1/3) ? "flag" : ""}">
+        <td class="l">${esc(r.name)}</td>
+        <td>${r.games}</td>
+        <td>${fmtInn(r.INF)}</td>
+        <td>${fmtInn(r.OF)}</td>
+        <td>${fmtInn(r.BN)}</td>
+        <td>${r.bnPerGame.toFixed(2)}</td>
+        <td>${Math.round(r.infShare*100)}%</td></tr>`).join("")}</tbody>
+    </table>
+    <div class="hint">Bn/G is bench innings per game played. Red means noticeably
+      more bench than the team average.</div>
+  </div>` : "";
+
+  return seasonCard + `<div class="card">
     <div class="h">Rotation history <span class="rule"></span></div>
     ${anyForked?`<div class="cardsw"><div class="seg">
       <button class="${trendMode==="live"?"on":""}" data-trend="live">What happened</button>
@@ -1468,9 +1541,23 @@ function viewGame(g){
     <div class="sub">${S.games.length} game${S.games.length===1?"":"s"} on file.</div>
     <div class="row">
       <button class="btn" id="dupGame">Copy to new game</button>
-      <button class="btn danger" id="delGame">Delete this game</button>
+      <button class="btn danger" id="delGame">Archive this game</button>
     </div>
-    <div class="hint">Copy carries the roster and batting order forward with an empty defense.</div>
+    <div class="hint">Copy carries the roster and batting order forward with an empty defense.
+      Archiving takes a game out of the totals without destroying it.</div>
+    <div class="row" style="margin-top:9px">
+      <button class="btn" id="exportCsv">Download season CSV</button>
+    </div>
+    <div class="hint">One row per player per game, plus season totals. Everything lives in
+      one database with no history \u2014 keep a copy somewhere you control.</div>
+    ${S.games.filter(archived).length ? `<div style="margin-top:11px">
+      <div class="countline">Archived</div>
+      ${S.games.filter(archived).map(x=>`<div style="display:flex;align-items:center;gap:8px;
+        padding:5px 0;border-bottom:1px solid #EEF0F2;font-size:14px">
+        <span style="flex:1">${fmtDate(x.date)}${x.opp?" "+esc(vsLabel(x)):""}</span>
+        <button class="btn ghost" data-restore="${x.id}"
+          style="padding:4px 10px;font-size:12px;flex:0 0 auto">Restore</button></div>`).join("")}
+    </div>` : ""}
   </div>
   <div class="card">
     <div class="h">Import a past game <span class="rule"></span></div>
@@ -1897,10 +1984,19 @@ document.addEventListener("click",e=>{
   else if(b.id==="dupGame") newGame(game());
   else if(b.id==="delGame"){
     const g=game();
-    if(!confirm("Delete the "+fmtDate(g.date)+" game?")) return;
-    S.games=S.games.filter(x=>x.id!==g.id);
-    S.cur=(S.games[S.games.length-1]||{}).id||null;
-    commit(); removeGame(g.id);
+    if(!confirm("Archive the "+fmtDate(g.date)+" game? It comes out of the season totals but can be restored.")) return;
+    g.arch = 1;
+    S.cur=(liveGames()[liveGames().length-1]||{}).id||null;
+    commit(); writeGameField(g.id,"arch",1);
+    refreshPicker();
+  }
+  else if(b.id==="exportCsv") downloadCsv();
+  else if(b.dataset.restore){
+    const gg=S.games.find(x=>x.id===b.dataset.restore);
+    if(!gg) return;
+    delete gg.arch;
+    S.cur=gg.id;
+    commit(); writeGameField(gg.id,"arch",DELETE);
     refreshPicker();
   }
 });
@@ -1917,16 +2013,55 @@ function newGame(from){
 }
 function reorderGames(){ S.games.sort((a,b)=>(a.date||"").localeCompare(b.date||"")); }
 function saveCur(){ try{ localStorage.setItem(LS+"_cur",S.cur||""); }catch(e){} }
+/* A season lives in one Firebase project with no backups and no history. This
+   is the way out: plain CSV, one row per player per game, opens in any sheet. */
+function seasonCsv(){
+  const q = v => `"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const rows = [["Date","Opponent","Home/Away","Innings played","Card",
+                 "Player","INF","OF","Bench","Positions"].map(q).join(",")];
+  liveGames().slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(g=>{
+    ["plan","live"].forEach(mode=>{
+      if(mode==="live" && !hasActual(g)) return;         // no fork, no second row set
+      const label = hasActual(g) ? (mode==="plan"?"Pregame":"Game day") : "Lineup";
+      const t = tallyGame(g, mode==="plan" ? planCard(g) : effCard(g));
+      present(g).forEach(p=>{
+        const r=t[p.id]; if(!r) return;
+        const pos = Object.keys(r.pos).sort().map(k=>k+" "+fmtInn(r.pos[k])).join(" ");
+        rows.push([g.date||"", g.opp||"", g.ha||"", scoredInnings(g), label,
+                   p.name, fmtInn(r.INF), fmtInn(r.OF), fmtInn(r.BN), pos].map(q).join(","));
+      });
+    });
+  });
+  rows.push("");
+  rows.push(["SEASON TOTALS"].map(q).join(","));
+  rows.push(["Player","Games","INF","OF","Bench","Bench per game","Infield %"].map(q).join(","));
+  seasonTotals(null).forEach(r=>{
+    rows.push([r.name, r.games, fmtInn(r.INF), fmtInn(r.OF), fmtInn(r.BN),
+               r.bnPerGame.toFixed(2), Math.round(r.infShare*100)+"%"].map(q).join(","));
+  });
+  return rows.join("\n");
+}
+function downloadCsv(){
+  const name = "warriors-season-"+new Date().toISOString().slice(0,10)+".csv";
+  const blob = new Blob([seasonCsv()], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+
 function copyGame(g){ const o = {id:g.id,date:g.date||"",opp:g.opp||"",innings:g.innings||6,
   out:[...(g.out||[])],order:[...(g.order||[])],slots:{...(g.slots||{})},created:g.created||Date.now()};
   if(g.ha) o.ha=g.ha;
   if(g.played) o.played=g.played;
   if(g.actual) o.actual={...g.actual};
+  if(g.arch) o.arch=g.arch;
   return o; }
 
 function refreshPicker(){
   const sel=document.getElementById("gamePick");
-  const sorted=[...S.games].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const sorted=[...S.games].filter(g=>!archived(g)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   sel.innerHTML=sorted.map(g=>
     `<option value="${g.id}" ${g.id===S.cur?"selected":""}>${fmtDate(g.date)}${g.opp?" "+esc(vsLabel(g)):""}</option>`
   ).join("") || `<option>No games</option>`;
