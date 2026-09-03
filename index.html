@@ -166,6 +166,20 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 }
 
 /* ---------- Checks ---------- */
+button.splitcell{width:100%;min-width:96px;border:1px solid var(--fog);border-radius:6px;
+  background:#FFFDF7;padding:7px 6px;font-size:13px;text-align:left;line-height:1.25;
+  border-left:3px solid var(--amber)}
+button.splitcell.dup{border-color:var(--red);background:var(--red-wash);color:var(--red-deep)}
+.ovl{position:fixed;inset:0;background:rgba(20,22,26,.45);z-index:60;
+  display:flex;align-items:flex-end;justify-content:center;padding:12px}
+.sheetbox{background:var(--card);border-radius:14px;padding:14px;width:100%;max-width:420px;
+  box-shadow:0 -6px 30px rgba(0,0,0,.25);margin-bottom:env(safe-area-inset-bottom)}
+.srow{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.srow .st{font-family:var(--mono);font-size:12px;color:var(--mute);letter-spacing:.06em;
+  width:76px;flex:none}
+.srow select{flex:1;border:1px solid var(--fog);border-radius:8px;padding:9px 10px;background:#fff}
+@media (orientation:landscape) and (max-height:620px){.ovl{align-items:center}}
+
 .cardsw{margin:-2px 0 9px}
 .cardsw .seg{max-width:280px}
 .cardsw .seg button b{font-family:var(--mono);font-size:11px;font-weight:600;
@@ -431,7 +445,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-03.0434";
+const BUILD  = "2026-09-03.0453";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -498,6 +512,25 @@ const key = (i,p) => "i"+i+"_"+p;
    game. Stats read ONE of them — actual when present, otherwise the plan — so
    a game can never be counted twice, and games played before this existed need
    no migration: with no `actual`, the plan simply is the game-day card. */
+/* An inning is three thirds, counted like MLB innings pitched: 0.1 = one third,
+   0.2 = two, 1.0 = a full inning. A slot holds either a plain player id (the
+   whole inning, which is how every existing game is stored) or a 3-entry array
+   by third. Whole innings never became arrays, so nothing needed migrating. */
+const THIRD = ["", "\u2153", "\u2154", ""];        // glyph by count of thirds
+function thirdsOf(v){
+  if(Array.isArray(v)) return [v[0]||null, v[1]||null, v[2]||null];
+  return v ? [v,v,v] : [null,null,null];
+}
+const isSplit = v => Array.isArray(v) && !(v[0] && v[0]===v[1] && v[1]===v[2]);
+function packThirds(a){
+  const [x,y,z] = a.map(v=>v||null);
+  if(x && x===y && y===z) return x;                 // collapses back to a whole inning
+  if(!x && !y && !z) return null;
+  return [x||"", y||"", z||""];
+}
+/* thirds -> "2.1" in MLB notation */
+const fmtInn = v => { const n = Math.round((v||0)*3); return Math.floor(n/3)+"."+(n%3); };
+
 const hasActual = g => !!(g.actual && Object.keys(g.actual).length);
 const effCard   = g => hasActual(g) ? g.actual : g.slots;
 const planCard  = g => g.slots;
@@ -523,51 +556,97 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const fmtDate = d => { if(!d) return "TBD";
   const [y,m,day]=d.split("-"); return m.replace(/^0/,"")+"/"+day.replace(/^0/,"")+"/"+y.slice(2); };
 
+/* who is at each position during one third */
+function occupantsAt(g,i,t,card){
+  const c = card || effCard(g), m={};
+  POSK.forEach(p=>{ const v = thirdsOf(c[key(i,p)])[t]; if(v) m[p]=v; });
+  return m;
+}
+/* positions with anyone in them at all, for display and coverage */
 function assignedIn(g,i,card){
   const c = card || effCard(g);
   const map={};
-  POSK.forEach(p=>{ const v=c[key(i,p)]; if(v) map[p]=v; });
+  POSK.forEach(p=>{ const v=c[key(i,p)]; if(v && thirdsOf(v).some(Boolean)) map[p]=v; });
   return map;
 }
-function benchIn(g,i,card){
-  const used = new Set(Object.values(assignedIn(g,i,card)));
-  return present(g).filter(p=>!used.has(p.id));
-}
-function dupsIn(g,i,card){
+/* positions covered for the whole inning */
+function fullPositions(g,i,card){
   const c = card || effCard(g);
-  const seen={}, dup=new Set();
-  POSK.forEach(p=>{ const v=c[key(i,p)]; if(!v) return;
-    if(seen[v]) dup.add(v); seen[v]=1; });
+  return POSK.filter(p=>thirdsOf(c[key(i,p)]).every(Boolean));
+}
+/* Bench is still derived. Each entry carries how many thirds they sat, so a
+   kid who came off after one out is not shown as having sat the inning. */
+function benchIn(g,i,card){
+  const counts = {};
+  [0,1,2].forEach(t=>{
+    const used = new Set(Object.values(occupantsAt(g,i,t,card)));
+    present(g).forEach(p=>{ if(!used.has(p.id)) counts[p.id]=(counts[p.id]||0)+1; });
+  });
+  return present(g).filter(p=>counts[p.id]).map(p=>({id:p.id, name:p.name, t:counts[p.id]}));
+}
+/* A player in two places at once, in any third */
+function dupsIn(g,i,card){
+  const dup=new Set();
+  [0,1,2].forEach(t=>{
+    const seen={};
+    const occ = occupantsAt(g,i,t,card);
+    POSK.forEach(p=>{ const v=occ[p]; if(!v) return; if(seen[v]) dup.add(v); seen[v]=1; });
+  });
   return dup;
+}
+/* Label for a cell: "Rex\u2154 Cole\u2153", or just the name for a whole inning */
+function cellLabel(v){
+  const t = thirdsOf(v);
+  if(!t.some(Boolean)) return "";
+  const runs=[];
+  t.forEach(id=>{ if(!id) return;
+    const e=runs.find(r=>r.id===id); if(e) e.n++; else runs.push({id,n:1}); });
+  return runs.map(r=>nameOf(r.id)+THIRD[r.n]).join(" ");
 }
 
 /* Per-player counts for one game */
 function tallyGame(g, card){
   const c = card || effCard(g);
-  const t={};
-  present(g).forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{}}; });
+  const th={};
+  present(g).forEach(p=>{ th[p.id]={INF:0,OF:0,BN:0,pos:{}}; });
   scoredList(g).forEach(i=>{
-    const a=assignedIn(g,i,c);
-    POSK.forEach(p=>{
-      const v=a[p]; if(!v||!t[v]) return;
-      t[v][GRP[p]]++; t[v].pos[p]=(t[v].pos[p]||0)+1;
+    [0,1,2].forEach(k=>{
+      const occ = occupantsAt(g,i,k,c);
+      POSK.forEach(p=>{
+        const v=occ[p]; if(!v||!th[v]) return;
+        th[v][GRP[p]]++; th[v].pos[p]=(th[v].pos[p]||0)+1;
+      });
     });
-    benchIn(g,i,c).forEach(p=>{ if(t[p.id]) t[p.id].BN++; });
+    benchIn(g,i,c).forEach(b=>{ if(th[b.id]) th[b.id].BN += b.t; });
+  });
+  // report in innings so every existing caller and threshold still reads the same
+  const t={};
+  Object.keys(th).forEach(id=>{
+    const r=th[id];
+    const pos={}, tpos={};
+    Object.keys(r.pos).forEach(k=>{ pos[k]=r.pos[k]/3; tpos[k]=r.pos[k]; });
+    t[id] = { INF:r.INF/3, OF:r.OF/3, BN:r.BN/3, pos,
+              tINF:r.INF, tOF:r.OF, tBN:r.BN, tpos };
   });
   return t;
 }
 
 /* Counts across a set of games */
-function tallyMany(list){
+function tallyMany(list, mode){
   const t={};
-  S.roster.forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{},games:0}; });
+  S.roster.forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{},tpos:{},tINF:0,tOF:0,tBN:0,games:0}; });
   list.forEach(g=>{
-    const one=tallyGame(g);
+    const one=tallyGame(g, mode==="plan" ? planCard(g) : effCard(g));
     for(const id in one){
       if(!t[id]) continue;
       t[id].games++;
       t[id].INF+=one[id].INF; t[id].OF+=one[id].OF; t[id].BN+=one[id].BN;
+      t[id].tINF=(t[id].tINF||0)+(one[id].tINF||0);
+      t[id].tOF =(t[id].tOF ||0)+(one[id].tOF ||0);
+      t[id].tBN =(t[id].tBN ||0)+(one[id].tBN ||0);
       for(const p in one[id].pos) t[id].pos[p]=(t[id].pos[p]||0)+one[id].pos[p];
+      one[id].tpos && Object.keys(one[id].tpos).forEach(p=>{
+        t[id].tpos = t[id].tpos||{}; t[id].tpos[p]=(t[id].tpos[p]||0)+one[id].tpos[p]; });
     }
   });
   return t;
@@ -595,13 +674,15 @@ function runChecks(card){
   scoredList(g).forEach(i=>{
     const d=dupsIn(g,i,c);
     if(d.size) dupInn.push(`Inn ${i}: ${[...d].map(nameOf).join(", ")}`);
-    const a=assignedIn(g,i,c);
-    const holes=POSK.filter(p=>!a[p]);
+    const full = fullPositions(g,i,c);
+    const holes = POSK.filter(p=>!full.includes(p));
     if(holes.length) holeInn.push(`Inn ${i}: ${holes.join(", ")}`);
     // a player marked out who is still on the card
-    Object.values(a).forEach(v=>{
-      if((g.out||[]).includes(v))
-        out.push({lv:"err",tag:"OUT",msg:`${nameOf(v)} is marked missing but is still in inning ${i}.`});
+    POSK.forEach(p=>{
+      thirdsOf(c[key(i,p)]).forEach(v=>{
+        if(v && (g.out||[]).includes(v))
+          out.push({lv:"err",tag:"OUT",msg:`${nameOf(v)} is marked missing but is still in inning ${i}.`});
+      });
     });
   });
   if(dupInn.length) out.push({lv:"err",tag:"DOUBLE",msg:"Same player twice in one inning — "+dupInn.join(" · ")});
@@ -672,9 +753,13 @@ const vsLabel = g => g.opp ? ((isAway(g) ? "@ " : "vs ") + g.opp) : "";
 const batsFirst = g => g.ha==="away" ? "Warriors bat first" : g.ha==="home" ? "Warriors field first" : "";
 
 function posOf(g, inning, id, card){
-  const a = assignedIn(g, inning, card);
-  for(const p of POSK) if(a[p]===id) return p;
-  return null;
+  const count = {};
+  [0,1,2].forEach(t=>{
+    const occ = occupantsAt(g, inning, t, card);
+    POSK.forEach(p=>{ if(occ[p]===id) count[p]=(count[p]||0)+1; });
+  });
+  const best = Object.keys(count).sort((a,b)=>count[b]-count[a])[0];
+  return best || null;
 }
 
 /* ---------------- Import ----------------
@@ -857,7 +942,23 @@ function paintSync(){
    let the slower phone erase the faster one. */
 function commit(){ saveLocal(); render(); }
 
-let cardMode = "plan";        // "plan" = pregame, "live" = game day
+let cardMode  = "plan";       // grid: "plan" = pregame, "live" = game day
+let trendMode = "live";       // trends: what happened, or what was planned
+
+/* Splitting is game-day only: a pregame plan is drawn in whole innings. */
+function setThird(i,p,t,val){
+  const g=game(); const k=key(i,p);
+  const card = cardMode==="live" ? effCard(g) : planCard(g);
+  const a = thirdsOf(card[k]);
+  a[t] = val || null;
+  setSlot(i,p,packThirds(a));
+}
+function collapseSlot(i,p){
+  const g=game(); const k=key(i,p);
+  const card = cardMode==="live" ? effCard(g) : planCard(g);
+  const first = thirdsOf(card[k]).find(Boolean) || null;
+  setSlot(i,p,first);
+}
 
 function setSlot(i,p,val){
   const g=game(); const k=key(i,p);
@@ -976,7 +1077,7 @@ function render(){
   if(!g){ v.innerHTML=`<div class="card"><div class="empty">No game yet. Tap <b>+ Game</b> to start a card.</div></div>`; return; }
   v.innerHTML = ({
     lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, notes:viewNotes, game:viewGame
-  }[tab])(g);
+  }[tab])(g) + (tab==="lineup" ? viewSplit() : "");
   renderPrint();
   const st=document.getElementById("stamp");
   if(st) st.textContent="BUILD "+BUILD+"  ·  SCHEMA "+SCHEMA;
@@ -984,7 +1085,7 @@ function render(){
 
 function renderTabs(){
   const g0=game();
-  const e=g0?errCount(cardMode==="live"?effCard(g0):planCard(g0)):0;
+  const e=g0?(errCount(planCard(g0)) + (hasActual(g0)?errCount(effCard(g0)):0)):0;
   const items=[
     ["lineup","Lineup", e?e:0],
     ["who","Who's In",0],
@@ -1004,7 +1105,8 @@ function viewLineup(g){
   const card  = cardMode==="live" ? effCard(g) : planCard(g);
   const diffs = cardDiff(g);
   const opts = id => `<option value="">—</option>` + pres.map(p=>
-      `<option value="${p.id}" ${p.id===id?"selected":""}>${esc(p.name)}</option>`).join("");
+      `<option value="${p.id}" ${p.id===id?"selected":""}>${esc(p.name)}</option>`).join("") +
+      (cardMode==="live" ? `<option value="__split">Split innings…</option>` : "");
 
   const head = innings(g).map(i=>{
     const filled=Object.keys(assignedIn(g,i,card)).length;
@@ -1016,8 +1118,14 @@ function viewLineup(g){
 
   const rows = POS.map(p=>{
     const cells = innings(g).map(i=>{
-      const val=card[key(i,p.k)]||"";
-      const dup=dupsIn(g,i,card).has(val);
+      const raw = card[key(i,p.k)];
+      if(isSplit(raw)){
+        const dup = thirdsOf(raw).some(id=>id && dupsIn(g,i,card).has(id));
+        return `<td class="cell"><button class="splitcell ${dup?"dup":""}"
+          data-split="${i}_${p.k}">${esc(cellLabel(raw))||"\u2014"}</button></td>`;
+      }
+      const val = raw || "";
+      const dup = dupsIn(g,i,card).has(val);
       return `<td class="cell"><select class="${!val?"empty":""} ${dup?"dup":""}"
         data-i="${i}" data-p="${p.k}">${opts(val)}</select></td>`;
     }).join("");
@@ -1026,7 +1134,8 @@ function viewLineup(g){
 
   const bench = innings(g).map(i=>{
     const b=benchIn(g,i,card);
-    return `<td class="benchnames ${b.length?"":"none"}">${b.length?b.map(x=>esc(x.name)).join("<br>"):"—"}</td>`;
+    return `<td class="benchnames ${b.length?"":"none"}">${b.length
+      ? b.map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join("<br>") : "—"}</td>`;
   }).join("");
 
   const unread = unreadNotes();
@@ -1034,7 +1143,16 @@ function viewLineup(g){
       <span class="tag">${unread} NEW</span>
       <span>${unread===1?"A note you haven't read":"Notes you haven't read"}. Tap to open.</span>
     </button>` : "";
-  const checks = noteFlag + runChecks(card).map(c=>
+  /* Checks read the PREGAME card. It is the lineup you build and balance, and
+     it is always whole innings, so fairness maths stay clean. The game-day card
+     records what happened rather than what was planned. */
+  const checkCard = planCard(g);
+  const liveErrs  = hasActual(g) ? errCount(effCard(g)) : 0;
+  const liveFlag  = liveErrs ? `<button class="check err" data-card="live">
+      <span class="tag">GAME DAY</span>
+      <span>${liveErrs} problem${liveErrs===1?"":"s"} on the game-day card, which is the one
+      that counts. Tap to open it.</span></button>` : "";
+  const checks = noteFlag + liveFlag + runChecks(checkCard).map(c=>
     `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
 
   return `
@@ -1072,7 +1190,8 @@ function viewLineup(g){
   </div>
 
   <div class="card">
-    <div class="h">Checks <span class="rule"></span></div>
+    <div class="h">Checks <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">PREGAME</span></div>
     ${checks}
   </div>
   </div>
@@ -1122,9 +1241,9 @@ function tallyTable(t, people, innTotal, share){
     const flag = r.BN>share || r.OF>=3;
     return `<tr class="${flag?"flag":""}">
       <td class="l">${esc(p.name)}</td>
-      <td class="${r.INF?"":"z"}">${r.INF}</td>
-      <td class="${r.OF?"":"z"}">${r.OF}</td>
-      <td class="${r.BN?"":"z"}">${r.BN}</td>
+      <td class="${r.INF?"":"z"}">${Number.isInteger(r.INF)?r.INF:fmtInn(r.INF)}</td>
+      <td class="${r.OF?"":"z"}">${Number.isInteger(r.OF)?r.OF:fmtInn(r.OF)}</td>
+      <td class="${r.BN?"":"z"}">${Number.isInteger(r.BN)?r.BN:fmtInn(r.BN)}</td>
       <td style="text-align:left;width:40%">
         ${r.INF?`<span class="bar" style="width:${w(r.INF)}px"></span>`:""}
         ${r.OF?`<span class="bar g" style="width:${w(r.OF)}px"></span>`:""}
@@ -1135,10 +1254,43 @@ function tallyTable(t, people, innTotal, share){
     <thead><tr><th class="l">Player</th><th>Inf</th><th>Out</th><th>Bn</th>
     <th class="l" style="padding-left:6px">Mix</th></tr></thead>
     <tbody>${rows}</tbody></table>
-    <div class="hint">Pitcher and catcher count as infield. Each player has ${innTotal} innings to split.</div>`;
+    <div class="hint">Pitcher and catcher count as infield. Each player has ${innTotal} innings to split.
+      Part-innings read like innings pitched \u2014 2.1 is two and a third.</div>`;
 }
 
-/* --- Who's In --- */
+/* --- Split sheet ---
+   Opened from the cell's own picker, so the grid gains no new controls. */
+let splitCell = null;      // {i, p}
+
+function viewSplit(){
+  if(!splitCell) return "";
+  const g=game(); if(!g) return "";
+  const {i,p} = splitCell;
+  const card = cardMode==="live" ? effCard(g) : planCard(g);
+  const a = thirdsOf(card[key(i,p)]);
+  const pres = present(g);
+  const label = (POS.find(x=>x.k===p)||{}).label || p;
+  const row = (t,name) => `<div class="srow">
+      <span class="st">${name}</span>
+      <select data-third="${t}">
+        <option value="">\u2014</option>
+        ${pres.map(x=>`<option value="${x.id}" ${x.id===a[t]?"selected":""}>${esc(x.name)}</option>`).join("")}
+      </select></div>`;
+  return `<div class="ovl" id="ovl">
+    <div class="sheetbox">
+      <div class="h">${p} \u00b7 ${esc(label)} <span class="rule"></span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--mute)">INN ${i}</span></div>
+      <div class="sub">Thirds of an inning, counted like innings pitched.</div>
+      ${row(0,"First \u2153")}${row(1,"Second \u2153")}${row(2,"Last \u2153")}
+      <div class="row" style="margin-top:11px">
+        <button class="btn ghost" id="splitWhole">Whole inning</button>
+        <button class="btn primary" id="splitDone">Done</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* --- Who\'s In --- */
 function viewWho(g){
   const out=g.out||[];
   const chips = S.roster.map(p=>{
@@ -1194,23 +1346,30 @@ function viewTrends(g){
   if(!list.length) return `<div class="card"><div class="empty">
     No earlier games on file yet. Add one under <b>Game</b> to start the history.</div></div>`;
 
-  const t=tallyMany(list);
+  const t=tallyMany(list, trendMode);
+  const anyForked = list.some(hasActual);
   const cols=POSK.concat(["BN"]);
   const rows=S.roster.map(p=>{
     const r=t[p.id]; if(!r||!r.games) return "";
     const tot=r.INF+r.OF+r.BN;
     const cells=cols.map(k=>{
       const n = k==="BN" ? r.BN : (r.pos[k]||0);
-      return `<td class="${n?"":"z"}">${n}</td>`;
+      return `<td class="${n?"":"z"}">${n?(Number.isInteger(n)?n:fmtInn(n)):0}</td>`;
     }).join("");
     const lowOpp = tot && (r.INF/Math.max(1,tot)) < .34;
     return `<tr class="${lowOpp?"flag":""}"><td class="l">${esc(p.name)}</td>${cells}
-      <td style="font-weight:600">${r.INF}</td><td style="font-weight:600">${r.OF}</td></tr>`;
+      <td style="font-weight:600">${Number.isInteger(r.INF)?r.INF:fmtInn(r.INF)}</td>
+      <td style="font-weight:600">${Number.isInteger(r.OF)?r.OF:fmtInn(r.OF)}</td></tr>`;
   }).join("");
 
   return `<div class="card">
     <div class="h">Rotation history <span class="rule"></span></div>
-    <div class="sub">${list.length} game${list.length>1?"s":""} · innings by position</div>
+    ${anyForked?`<div class="cardsw"><div class="seg">
+      <button class="${trendMode==="live"?"on":""}" data-trend="live">What happened</button>
+      <button class="${trendMode==="plan"?"on":""}" data-trend="plan">As planned</button>
+    </div></div>`:""}
+    <div class="sub">${list.length} game${list.length>1?"s":""} · innings by position${
+      anyForked && trendMode==="plan" ? " · pregame lineups, not what was played" : ""}</div>
     <div class="gridscroll">
       <table class="tally" style="width:max-content;min-width:100%">
         <thead><tr><th class="l">Player</th>${cols.map(c=>`<th>${c}</th>`).join("")}
@@ -1447,11 +1606,11 @@ function renderDisplay(){
   const rows = POS.map(p=>`<tr><td class="pos">${p.k}</td>${
     innings(g).map(i=>{
       const v = card[key(i,p.k)];
-      return `<td class="${i===inn?"live":""}">${v?esc(nameOf(v)):""}</td>`;
+      return `<td class="${i===inn?"live":""}">${esc(cellLabel(v))}</td>`;
     }).join("")}</tr>`).join("");
   const bench = `<tr class="bn"><td class="pos">BN</td>${
     innings(g).map(i=>`<td class="${i===inn?"live":""}">${
-      benchIn(g,i).map(x=>esc(x.name)).join(" / ")||"—"}</td>`).join("")}</tr>`;
+      benchIn(g,i,card).map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join(" / ")||"—"}</td>`).join("")}</tr>`;
 
   host.innerHTML = `
   <div class="dwrap">
@@ -1531,9 +1690,9 @@ function renderPrint(){
   const inn=innings(g);
   const head=inn.map(i=>`<th>${i}</th>`).join("");
   const rows=POS.map(p=>`<tr><td class="pos">${p.k}</td>${
-    inn.map(i=>`<td>${esc(nameOf(card[key(i,p.k)])).replace("?","")}</td>`).join("")}</tr>`).join("");
+    inn.map(i=>`<td>${esc(cellLabel(card[key(i,p.k)]))}</td>`).join("")}</tr>`).join("");
   const bench=`<tr class="pbench"><td class="pos">BN</td>${
-    inn.map(i=>`<td>${benchIn(g,i).map(x=>esc(x.name)).join(" / ")||"—"}</td>`).join("")}</tr>`;
+    inn.map(i=>`<td>${benchIn(g,i,card).map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join(" / ")||"—"}</td>`).join("")}</tr>`;
   const order=(g.order||[]).filter(id=>!(g.out||[]).includes(id));
   const bat=order.map((id,i)=>`<tr><td class="n">${i+1}</td><td>${esc(nameOf(id))}</td></tr>`).join("");
   const outs=(g.out||[]).map(nameOf).join(", ");
@@ -1563,7 +1722,20 @@ function renderPrint(){
 /* ---------------- Events ---------------- */
 document.addEventListener("change",e=>{
   const t=e.target;
-  if(t.matches("td.cell select")) setSlot(+t.dataset.i, t.dataset.p, t.value);
+  if(t.matches("td.cell select")){
+    if(t.value === "__split"){
+      splitCell = {i:+t.dataset.i, p:t.dataset.p};
+      const cur = (cardMode==="live"?effCard(game()):planCard(game()))[key(splitCell.i,splitCell.p)];
+      // seed the sheet from whatever is already there, so nothing is lost
+      if(cur && !Array.isArray(cur)) setSlot(splitCell.i, splitCell.p, [cur,cur,cur]);
+      else render();
+      return;
+    }
+    setSlot(+t.dataset.i, t.dataset.p, t.value);
+  }
+  else if(t.dataset.third !== undefined && splitCell){
+    setThird(splitCell.i, splitCell.p, +t.dataset.third, t.value);
+  }
   else if(t.id==="gamePick"){ S.cur=t.value; saveCur(); render(); }
   else if(t.id==="gDate"){ game().date=t.value; reorderGames(); commit();
     writeGameField(game().id,"date",game().date); refreshPicker(); }
@@ -1641,7 +1813,19 @@ document.addEventListener("click",e=>{
   else if(b.dataset.delnote){
     if(confirm("Delete this note?")) dropNote(b.dataset.delnote);
   }
-  else if(b.dataset.card){ cardMode = b.dataset.card; render(); }
+  else if(b.dataset.split){
+    const [i,pos] = b.dataset.split.split("_");
+    splitCell = {i:+i, p:pos};
+    render();
+  }
+  else if(b.id==="splitDone"){ splitCell=null; render(); }
+  else if(b.id==="splitWhole"){
+    const c=splitCell; splitCell=null;
+    if(c) collapseSlot(c.i, c.p); else render();
+  }
+  else if(b.id==="ovl"){ splitCell=null; render(); }
+  else if(b.dataset.trend){ trendMode = b.dataset.trend; render(); }
+  else if(b.dataset.card){ cardMode = b.dataset.card; tab="lineup"; render(); }
   else if(b.dataset.ha !== undefined){
     const g=game(); g.ha=b.dataset.ha||"";
     commit(); writeGameField(g.id,"ha",g.ha); refreshPicker();
