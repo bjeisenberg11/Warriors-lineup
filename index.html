@@ -1641,6 +1641,7 @@ document.addEventListener("click",e=>{
   else if(b.dataset.delnote){
     if(confirm("Delete this note?")) dropNote(b.dataset.delnote);
   }
+  else if(b.dataset.card){ cardMode = b.dataset.card; render(); }
   else if(b.dataset.ha !== undefined){
     const g=game(); g.ha=b.dataset.ha||"";
     commit(); writeGameField(g.id,"ha",g.ha); refreshPicker();
