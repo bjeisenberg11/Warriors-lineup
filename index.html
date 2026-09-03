@@ -10,18 +10,17 @@
 <meta name="apple-mobile-web-app-title" content="Warriors">
 <meta name="application-name" content="Warriors">
 <meta name="theme-color" content="#23262B">
-<!-- Standalone mode is ON, second attempt.
-     2026-08-30: enabled it; Print appeared to do nothing from the home-screen app.
-     Corrected: the print sheet IS created, it just does not paint until the view
-     is forced to redraw — backgrounding the app and returning brings the dialog
-     up. So this is a compositing/presentation bug, not a missing capability.
-     doPrint now forces a reflow and defers the call out of the touch handler.
-     A Safari fallback button is shown when running standalone.
-     If Print still needs the app-switcher trick, say so and this goes back to
-     "display": "browser" with the two meta tags below removed. -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Standalone mode is OFF. Two attempts, both tested on device, both failed:
+       2026-08-30  enabled; Print did nothing from the home-screen icon.
+       2026-08-31  forced a repaint (transform toggle, layout flush, two rAFs,
+                   deferred call) before window.print(). Still nothing. Only
+                   backgrounding the app and returning presents the sheet.
+     The Safari fallback failed too, and predictably: iOS keeps same-origin
+     navigation inside the web app's scope, so a target="_blank" link to our own
+     URL just reloaded the app. A hand-off would need a different origin.
+     Conclusion: printing works in Safari, not from a home-screen web app.
+     iOS grants push only to home-screen web apps. One icon cannot do both.
+     Do not re-enable without re-testing PRINT on a device first. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -167,6 +166,12 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 }
 
 /* ---------- Checks ---------- */
+.cardsw{margin:-2px 0 9px}
+.cardsw .seg{max-width:280px}
+.cardsw .seg button b{font-family:var(--mono);font-size:11px;font-weight:600;
+  background:rgba(255,255,255,.28);border-radius:8px;padding:0 5px;margin-left:3px}
+.cardsw .seg button:not(.on) b{background:var(--fog);color:var(--steel)}
+
 .hachip{font-family:var(--disp);font-weight:700;font-size:12px;letter-spacing:.08em;
   text-transform:uppercase;padding:2px 8px;border-radius:4px;color:#fff}
 .hachip.home{background:var(--red)}
@@ -352,7 +357,7 @@ table.dtab tr.bn td.live{color:#fff}
      orientation always agrees
      with whether the sheet is being rotated. Geometry is measured, never
      assumed: a hard-coded page size overflowed and sliced off the batting
-     column on the co-coach's phone. */
+     column on a second phone. */
   .psheet{transform-origin:0 0}
   body.rot .psheet{position:absolute;top:0;left:0}
   body{background:#fff}
@@ -414,7 +419,7 @@ table.dtab tr.bn td.live{color:#fff}
 /* =========================================================================
    DEERFIELD 9U WARRIORS — LINEUP
    Single file. Works offline on this device by default.
-   To share live with your co-coach, paste your Firebase config below.
+   To share it live across devices, paste your Firebase config below.
    ========================================================================= */
 
 const FIREBASE_CONFIG = {
@@ -426,7 +431,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-08-31.0243";
+const BUILD  = "2026-09-03.0434";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -477,8 +482,8 @@ function seedGame(){
 }
 
 /* ---------------- State ---------------- */
-let S = { roster:[], games:[], notes:[], cur:null };
-let ME = null;                 // "Blake" or "Ryan" — per device, no accounts
+let S = { roster:[], games:[], notes:[], coaches:[], cur:null };
+let ME = null;                 // whoever this device belongs to — no accounts
 let notesSeen = 0;
 
 /* ---------------- Helpers ---------------- */
@@ -487,6 +492,21 @@ const nameOf = id => (byId(id)||{}).name || "?";
 const game = () => S.games.find(g=>g.id===S.cur) || null;
 const present = g => S.roster.filter(p=>!(g.out||[]).includes(p.id));
 const key = (i,p) => "i"+i+"_"+p;
+
+/* Two cards per game. `slots` is the pregame plan, kept as a record. `actual`
+   is the game-day card and only exists once something is changed during the
+   game. Stats read ONE of them — actual when present, otherwise the plan — so
+   a game can never be counted twice, and games played before this existed need
+   no migration: with no `actual`, the plan simply is the game-day card. */
+const hasActual = g => !!(g.actual && Object.keys(g.actual).length);
+const effCard   = g => hasActual(g) ? g.actual : g.slots;
+const planCard  = g => g.slots;
+const cardDiff  = g => {
+  if(!hasActual(g)) return 0;
+  const keys = new Set([...Object.keys(g.slots||{}), ...Object.keys(g.actual||{})]);
+  let n=0; keys.forEach(k=>{ if((g.slots||{})[k] !== (g.actual||{})[k]) n++; });
+  return n;
+};
 const innings = g => Array.from({length:g.innings||6},(_,i)=>i+1);
 /* Time limits end games early. `played` records how many innings actually
    happened; everything that measures what a kid DID uses this, so nobody is
@@ -503,33 +523,36 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const fmtDate = d => { if(!d) return "TBD";
   const [y,m,day]=d.split("-"); return m.replace(/^0/,"")+"/"+day.replace(/^0/,"")+"/"+y.slice(2); };
 
-function assignedIn(g,i){
+function assignedIn(g,i,card){
+  const c = card || effCard(g);
   const map={};
-  POSK.forEach(p=>{ const v=g.slots[key(i,p)]; if(v) map[p]=v; });
+  POSK.forEach(p=>{ const v=c[key(i,p)]; if(v) map[p]=v; });
   return map;
 }
-function benchIn(g,i){
-  const used = new Set(Object.values(assignedIn(g,i)));
+function benchIn(g,i,card){
+  const used = new Set(Object.values(assignedIn(g,i,card)));
   return present(g).filter(p=>!used.has(p.id));
 }
-function dupsIn(g,i){
+function dupsIn(g,i,card){
+  const c = card || effCard(g);
   const seen={}, dup=new Set();
-  POSK.forEach(p=>{ const v=g.slots[key(i,p)]; if(!v) return;
+  POSK.forEach(p=>{ const v=c[key(i,p)]; if(!v) return;
     if(seen[v]) dup.add(v); seen[v]=1; });
   return dup;
 }
 
 /* Per-player counts for one game */
-function tallyGame(g){
+function tallyGame(g, card){
+  const c = card || effCard(g);
   const t={};
   present(g).forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{}}; });
   scoredList(g).forEach(i=>{
-    const a=assignedIn(g,i);
+    const a=assignedIn(g,i,c);
     POSK.forEach(p=>{
       const v=a[p]; if(!v||!t[v]) return;
       t[v][GRP[p]]++; t[v].pos[p]=(t[v].pos[p]||0)+1;
     });
-    benchIn(g,i).forEach(p=>{ if(t[p.id]) t[p.id].BN++; });
+    benchIn(g,i,c).forEach(p=>{ if(t[p.id]) t[p.id].BN++; });
   });
   return t;
 }
@@ -558,8 +581,9 @@ function priorGames(){
 }
 
 /* ---------------- Checks ---------------- */
-function runChecks(){
+function runChecks(card){
   const g=game(); if(!g) return [];
+  const c = card || effCard(g);
   const out=[], pres=present(g), n=pres.length;
 
   if(n < FIELD_N){
@@ -569,9 +593,9 @@ function runChecks(){
   // per-inning integrity
   const dupInn=[], holeInn=[];
   scoredList(g).forEach(i=>{
-    const d=dupsIn(g,i);
+    const d=dupsIn(g,i,c);
     if(d.size) dupInn.push(`Inn ${i}: ${[...d].map(nameOf).join(", ")}`);
-    const a=assignedIn(g,i);
+    const a=assignedIn(g,i,c);
     const holes=POSK.filter(p=>!a[p]);
     if(holes.length) holeInn.push(`Inn ${i}: ${holes.join(", ")}`);
     // a player marked out who is still on the card
@@ -584,7 +608,7 @@ function runChecks(){
   if(holeInn.length) out.push({lv:"err",tag:"HOLE",msg:"Position not filled — "+holeInn.join(" · ")});
 
   // fairness
-  const t=tallyGame(g);
+  const t=tallyGame(g,c);
   const prev=priorGames()[0];
   const pt=prev?tallyGame(prev):null;
 
@@ -633,7 +657,7 @@ function runChecks(){
     out.push({lv:"ok",tag:"SET",msg:`Card is clean. ${n} players, ${scoredInnings(g)} innings, every spot covered.`});
   return out;
 }
-const errCount = () => runChecks().filter(c=>c.lv==="err").length;
+const errCount = card => runChecks(card).filter(c=>c.lv==="err").length;
 
 /* The live inning is stored on the game document so every device agrees:
    advance it on a phone and the iPad on the fence follows. */
@@ -647,8 +671,8 @@ const isAway  = g => g.ha === "away";
 const vsLabel = g => g.opp ? ((isAway(g) ? "@ " : "vs ") + g.opp) : "";
 const batsFirst = g => g.ha==="away" ? "Warriors bat first" : g.ha==="home" ? "Warriors field first" : "";
 
-function posOf(g, inning, id){
-  const a = assignedIn(g, inning);
+function posOf(g, inning, id, card){
+  const a = assignedIn(g, inning, card);
   for(const p of POSK) if(a[p]===id) return p;
   return null;
 }
@@ -781,7 +805,7 @@ let tab = "lineup";
 /* ---------------- Local cache (mirror of the server, never the source of truth) --- */
 const LS = "warriors_lineup_v1";
 function saveLocal(){
-  try{ localStorage.setItem(LS, JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games,notes:S.notes})); }
+  try{ localStorage.setItem(LS, JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games,notes:S.notes,coaches:S.coaches})); }
   catch(e){ note("cache write failed: "+codeOf(e)); }
 }
 function loadLocal(){
@@ -791,7 +815,7 @@ function loadLocal(){
     const d = JSON.parse(raw);
     if(!d || !Array.isArray(d.roster)) return false;
     if((d.schema||0) !== SCHEMA){ note("cache written under schema "+(d.schema||0)+", ignored"); return false; }
-    S.roster = d.roster; S.games = d.games||[]; S.notes = d.notes||[];
+    S.roster = d.roster; S.games = d.games||[]; S.notes = d.notes||[]; S.coaches = d.coaches||[];
     return true;
   }catch(e){ note("cache read failed: "+codeOf(e)); return false; }
 }
@@ -833,11 +857,26 @@ function paintSync(){
    let the slower phone erase the faster one. */
 function commit(){ saveLocal(); render(); }
 
+let cardMode = "plan";        // "plan" = pregame, "live" = game day
+
 function setSlot(i,p,val){
   const g=game(); const k=key(i,p);
-  if(val) g.slots[k]=val; else delete g.slots[k];
-  commit();
-  writeGameField(g.id, "slots."+k, val || DELETE);
+  if(cardMode === "live"){
+    if(!hasActual(g)){
+      // First game-day change forks the plan. Copying it whole keeps the two
+      // cards independent, so a later plan edit cannot leak into the record.
+      g.actual = Object.assign({}, g.slots);
+      writeGameField(g.id, "actual", g.actual);
+      note("game-day card started from the pregame plan");
+    }
+    if(val) g.actual[k]=val; else delete g.actual[k];
+    commit();
+    writeGameField(g.id, "actual."+k, val || DELETE);
+  }else{
+    if(val) g.slots[k]=val; else delete g.slots[k];
+    commit();
+    writeGameField(g.id, "slots."+k, val || DELETE);
+  }
 }
 function toggleOut(id){
   const g=game(); g.out=g.out||[];
@@ -848,6 +887,7 @@ function toggleOut(id){
     g.out.push(id);
     g.order=g.order.filter(x=>x!==id);
     Object.keys(g.slots).forEach(k=>{ if(g.slots[k]===id) delete g.slots[k]; });
+    if(g.actual) Object.keys(g.actual).forEach(k=>{ if(g.actual[k]===id) delete g.actual[k]; });
   }
   commit();
   writeGame(g);
@@ -863,7 +903,24 @@ function moveBat(id,dir){
 /* ---------------- Notes ----------------
    Two coaches, no accounts. Each device says who it is once; that name is
    stamped on anything written from it. */
-const COACHES = ["Blake","Ryan"];
+/* Names are not hard-coded. The list is whatever has been used before, from
+   the shared list and from the notes themselves, plus anyone new who types
+   their name in. */
+const coachNames = () => {
+  const set = new Set();
+  (S.coaches||[]).forEach(n=>{ if(n) set.add(n); });
+  (S.notes||[]).forEach(n=>{ if(n.who) set.add(n.who); });
+  return [...set].sort((a,b)=>a.localeCompare(b));
+};
+function addCoach(name){
+  const nm = String(name||"").trim().slice(0,24);
+  if(!nm) return;
+  if(!(S.coaches||[]).some(c=>c.toLowerCase()===nm.toLowerCase())){
+    S.coaches = [...(S.coaches||[]), nm];
+    saveLocal(); writeCoaches();
+  }
+  setMe(nm);
+}
 function loadMe(){
   try{ ME = localStorage.getItem(LS+"_me") || null; }catch(e){ ME=null; }
   try{ notesSeen = +(localStorage.getItem(LS+"_seen")||0); }catch(e){ notesSeen=0; }
@@ -926,7 +983,8 @@ function render(){
 }
 
 function renderTabs(){
-  const e=errCount();
+  const g0=game();
+  const e=g0?errCount(cardMode==="live"?effCard(g0):planCard(g0)):0;
   const items=[
     ["lineup","Lineup", e?e:0],
     ["who","Who's In",0],
@@ -943,12 +1001,14 @@ function renderTabs(){
 /* --- Lineup --- */
 function viewLineup(g){
   const pres=present(g);
+  const card  = cardMode==="live" ? effCard(g) : planCard(g);
+  const diffs = cardDiff(g);
   const opts = id => `<option value="">—</option>` + pres.map(p=>
       `<option value="${p.id}" ${p.id===id?"selected":""}>${esc(p.name)}</option>`).join("");
 
   const head = innings(g).map(i=>{
-    const filled=Object.keys(assignedIn(g,i)).length;
-    const done=filled===FIELD_N && !dupsIn(g,i).size;
+    const filled=Object.keys(assignedIn(g,i,card)).length;
+    const done=filled===FIELD_N && !dupsIn(g,i,card).size;
     return `<th class="inhead ${done?"done":""}"><div class="n">${i}</div>
       <div class="dots">${Array.from({length:FIELD_N},(_,x)=>
         `<span class="dot ${x<filled?"f":""}"></span>`).join("")}</div></th>`;
@@ -956,8 +1016,8 @@ function viewLineup(g){
 
   const rows = POS.map(p=>{
     const cells = innings(g).map(i=>{
-      const val=g.slots[key(i,p.k)]||"";
-      const dup=dupsIn(g,i).has(val);
+      const val=card[key(i,p.k)]||"";
+      const dup=dupsIn(g,i,card).has(val);
       return `<td class="cell"><select class="${!val?"empty":""} ${dup?"dup":""}"
         data-i="${i}" data-p="${p.k}">${opts(val)}</select></td>`;
     }).join("");
@@ -965,16 +1025,16 @@ function viewLineup(g){
   }).join("");
 
   const bench = innings(g).map(i=>{
-    const b=benchIn(g,i);
+    const b=benchIn(g,i,card);
     return `<td class="benchnames ${b.length?"":"none"}">${b.length?b.map(x=>esc(x.name)).join("<br>"):"—"}</td>`;
   }).join("");
 
   const unread = unreadNotes();
   const noteFlag = unread ? `<button class="check note-flag" data-tab="notes">
       <span class="tag">${unread} NEW</span>
-      <span>${unread===1?"A note you haven't read":"Notes you haven't read"} from the other coach. Tap to open.</span>
+      <span>${unread===1?"A note you haven't read":"Notes you haven't read"}. Tap to open.</span>
     </button>` : "";
-  const checks = noteFlag + runChecks().map(c=>
+  const checks = noteFlag + runChecks(card).map(c=>
     `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
 
   return `
@@ -986,7 +1046,19 @@ function viewLineup(g){
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${pres.length} IN · ${g.innings} INN</span></div>
     ${(g.opp||g.ha)?`<div class="matchup">${esc(g.opp?vsLabel(g):(isAway(g)?"Away game":"Home game"))}${
       g.ha?` · <span>${esc(batsFirst(g))}</span>`:""}</div>`:""}
-    <div class="sub">Tap a cell to set the player. Bench fills in on its own.</div>
+    <div class="cardsw">
+      <div class="seg">
+        <button class="${cardMode==="plan"?"on":""}" data-card="plan">Pregame</button>
+        <button class="${cardMode==="live"?"on":""}" data-card="live">Game day${
+          diffs?` <b>${diffs}</b>`:""}</button>
+      </div>
+    </div>
+    <div class="sub">${cardMode==="live"
+      ? (hasActual(g)
+          ? `Changes here don't touch the pregame plan. Stats and trends use this card.`
+          : `Same as the pregame plan until you change something. Stats and trends use this card.`)
+      : `The lineup you set before the game, kept as a record.${
+          diffs?` The game-day card differs in ${diffs} spot${diffs===1?"":"s"}.`:""}`}</div>
     <div class="gridscroll">
       <table class="grid">
         <thead><tr><th class="poscell" style="border-bottom:1px solid var(--fog)"></th>${head}</tr></thead>
@@ -1008,7 +1080,9 @@ function viewLineup(g){
   <aside class="splitside">
   <div class="card">
     <div class="h">This game <span class="rule"></span></div>
-    ${tallyTable(tallyGame(g), pres, scoredInnings(g), Math.ceil(Math.max(0,pres.length-FIELD_N)*scoredInnings(g)/Math.max(1,pres.length)))}
+    ${tallyTable(tallyGame(g,card), pres, scoredInnings(g), Math.ceil(Math.max(0,pres.length-FIELD_N)*scoredInnings(g)/Math.max(1,pres.length)))}
+    ${cardMode==="plan" && diffs?`<div class="hint" style="color:var(--red-deep)">
+      These are the pregame numbers. Trends use the game-day card.</div>`:""}
   </div>
 
   </aside>
@@ -1024,7 +1098,7 @@ function viewLineup(g){
     <div class="hint"><b>On the iPad:</b> open this app and tap Open display, then use
       Share \u2192 Add to Home Screen while it's showing. The crest icon then goes straight
       to the display, and you never type a URL again.<br><br>
-      It follows every change you or Ryan make, and the inning arrows move everyone's
+      It follows every change made on any device, and the inning arrows move every
       screen at once.</div>
   </div>
 
@@ -1034,9 +1108,7 @@ function viewLineup(g){
       <button class="btn primary" id="printNormal">Print card</button>
       <button class="btn" id="printRot">Print sideways</button>
     </div>
-    ${launchMode().startsWith("standalone")?`<div class="row" style="margin-top:8px">
-      <button class="btn ghost" id="printSafari">Didn't open? Print from Safari</button>
-    </div>`:""}
+
     <div class="hint">Tap <b>Print card</b> and set Landscape in the preview. If the preview
       is stuck in portrait, back out and use <b>Print sideways</b> — it turns the sheet on the
       page so it still reads landscape.</div>
@@ -1162,11 +1234,17 @@ function viewTrends(g){
 /* --- Notes --- */
 function viewNotes(){
   if(!ME){
+    const known = coachNames();
     return `<div class="card">
-      <div class="h">Who are you? <span class="rule"></span></div>
-      <div class="sub">Asked once on this phone, so notes get the right name on them.</div>
-      <div class="row">${COACHES.map(c=>
-        `<button class="btn primary" data-me="${c}" style="flex:1">${c}</button>`).join("")}</div>
+      <div class="h">Who's writing? <span class="rule"></span></div>
+      <div class="sub">Asked once on this device, so notes carry the right name.</div>
+      ${known.length?`<div class="row" style="margin-bottom:9px">${known.map(c=>
+        `<button class="btn primary" data-me="${esc(c)}">${esc(c)}</button>`).join("")}</div>`:""}
+      <div class="row">
+        <input class="t" id="newCoach" placeholder="${known.length?"Someone else":"Your name"}"
+          autocomplete="name" maxlength="24">
+        <button class="btn" id="addCoach" style="flex:0 0 auto">Use</button>
+      </div>
     </div>`;
   }
   const list = sortedNotes();
@@ -1184,7 +1262,7 @@ function viewNotes(){
   return `<div class="card">
     <div class="h">Notes <span class="rule"></span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${esc(ME)}</span></div>
-    <div class="sub">Shared with the other coach. Whatever you write shows up on their phone.</div>
+    <div class="sub">Shared with everyone using this app. Whatever you write shows up on their device.</div>
     <textarea class="t" id="noteText" rows="3"
       placeholder="Ryder's arm was sore — keep him off the mound Saturday"></textarea>
     <div class="row" style="margin-top:9px">
@@ -1333,15 +1411,7 @@ function doPrint(rot){
     }, 80);
   }));
 }
-function printViaSafari(){
-  const a = document.createElement("a");
-  a.href = location.origin + location.pathname;
-  a.target = "_blank";
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+
 window.addEventListener("afterprint", clearPrint);
 // Printing from Safari's share sheet never touches our buttons, so fit there too.
 window.addEventListener("beforeprint", ()=>{
@@ -1358,11 +1428,12 @@ function renderDisplay(){
   if(!g){ host.innerHTML = `<div class="dwrap"><div class="dtitle">No game selected</div></div>`; return; }
 
   const inn = liveInning(g);
+  const card = effCard(g);          // the tablet always shows the real one
   const order = (g.order||[]).filter(id=>!(g.out||[]).includes(id) && byId(id));
-  const benchNow = new Set(benchIn(g, inn).map(p=>p.id));
+  const benchNow = new Set(benchIn(g, inn, card).map(p=>p.id));
 
   const bats = order.map((id,i)=>{
-    const pos = posOf(g, inn, id);
+    const pos = posOf(g, inn, id, card);
     const label = pos || (benchNow.has(id) ? "BN" : "—");
     return `<div class="dbatrow">
       <span class="n">${i+1}</span>
@@ -1375,7 +1446,7 @@ function renderDisplay(){
     `<th class="${i===inn?"live":""}">${i}</th>`).join("");
   const rows = POS.map(p=>`<tr><td class="pos">${p.k}</td>${
     innings(g).map(i=>{
-      const v = g.slots[key(i,p.k)];
+      const v = card[key(i,p.k)];
       return `<td class="${i===inn?"live":""}">${v?esc(nameOf(v)):""}</td>`;
     }).join("")}</tr>`).join("");
   const bench = `<tr class="bn"><td class="pos">BN</td>${
@@ -1456,10 +1527,11 @@ window.addEventListener("hashchange", applyRoute);
 /* --- Print sheet --- */
 function renderPrint(){
   const g=game(); if(!g){ document.getElementById("print").innerHTML=""; return; }
+  const card = cardMode==="live" ? effCard(g) : planCard(g);
   const inn=innings(g);
   const head=inn.map(i=>`<th>${i}</th>`).join("");
   const rows=POS.map(p=>`<tr><td class="pos">${p.k}</td>${
-    inn.map(i=>`<td>${esc(nameOf(g.slots[key(i,p.k)])).replace("?","")}</td>`).join("")}</tr>`).join("");
+    inn.map(i=>`<td>${esc(nameOf(card[key(i,p.k)])).replace("?","")}</td>`).join("")}</tr>`).join("");
   const bench=`<tr class="pbench"><td class="pos">BN</td>${
     inn.map(i=>`<td>${benchIn(g,i).map(x=>esc(x.name)).join(" / ")||"—"}</td>`).join("")}</tr>`;
   const order=(g.order||[]).filter(id=>!(g.out||[]).includes(id));
@@ -1483,7 +1555,8 @@ function renderPrint(){
         <tbody>${bat}</tbody>
       </table>
     </div>
-    <div class="pfoot"><span>P and C count as infield.</span><span>Bench rotates every inning.</span></div>
+    <div class="pfoot"><span>P and C count as infield.</span><span>Bench rotates every inning.</span>
+      <span>${cardMode==="live"&&hasActual(g)?"Game-day card":"Pregame lineup"}</span></div>
   </div>`;
 }
 
@@ -1553,6 +1626,10 @@ document.addEventListener("click",e=>{
   else if(b.id==="incCur"){
     document.body.dataset.incCur = document.body.dataset.incCur==="1"?"0":"1"; render();
   }
+  else if(b.id==="addCoach"){
+    const el=document.getElementById("newCoach");
+    addCoach(el && el.value);
+  }
   else if(b.dataset.me !== undefined){ setMe(b.dataset.me || null); }
   else if(b.id==="notePost"){
     const el=document.getElementById("noteText");
@@ -1581,7 +1658,6 @@ document.addEventListener("click",e=>{
         catch(()=>prompt("Copy this link:", url));
     } else prompt("Copy this link:", url);
   }
-  else if(b.id==="printSafari") printViaSafari();
   else if(b.id==="printNormal") doPrint(false);
   else if(b.id==="printRot") doPrint(true);
   else if(b.id==="impPreview" || b.id==="impGo"){
@@ -1656,8 +1732,12 @@ function newGame(from){
 }
 function reorderGames(){ S.games.sort((a,b)=>(a.date||"").localeCompare(b.date||"")); }
 function saveCur(){ try{ localStorage.setItem(LS+"_cur",S.cur||""); }catch(e){} }
-function copyGame(g){ return {id:g.id,date:g.date||"",opp:g.opp||"",innings:g.innings||6,
-  out:[...(g.out||[])],order:[...(g.order||[])],slots:{...(g.slots||{})},created:g.created||Date.now()}; }
+function copyGame(g){ const o = {id:g.id,date:g.date||"",opp:g.opp||"",innings:g.innings||6,
+  out:[...(g.out||[])],order:[...(g.order||[])],slots:{...(g.slots||{})},created:g.created||Date.now()};
+  if(g.ha) o.ha=g.ha;
+  if(g.played) o.played=g.played;
+  if(g.actual) o.actual={...g.actual};
+  return o; }
 
 function refreshPicker(){
   const sel=document.getElementById("gamePick");
@@ -1671,7 +1751,7 @@ function refreshPicker(){
    Shape:  teams/{TEAM_ID}                -> { schema, roster:[...] }
            teams/{TEAM_ID}/games/{gameId} -> { date, opp, innings, out, order, slots:{...} }
    `slots` is a map, not an array, so a single cell can be written by field
-   path and merged with a co-coach's simultaneous edit to a different cell. */
+   path and merged with someone else's simultaneous edit to a different cell. */
 
 const DELETE = Symbol("delete-field");
 let FS=null, DB=null, teamRef=null, gamesRef=null;
@@ -1696,6 +1776,7 @@ async function connect(){
     fs.onSnapshot(teamRef, snap=>{
       sawTeam=true; teamExists=snap.exists();
       const d=snap.data();
+      if(d && Array.isArray(d.coaches)) S.coaches = d.coaches;
       if(d && Array.isArray(d.roster) && d.roster.length){ S.roster=d.roster; teamHasRoster=true; }
       else if(d && typeof d.state==="string"){
         // migration from the original single-document format
@@ -1768,6 +1849,10 @@ function track(promise, what){
   });
 }
 
+function writeCoaches(){
+  if(!DB || !ready) return;
+  track(FS.setDoc(teamRef,{coaches:S.coaches||[],at:Date.now()},{merge:true}),"names");
+}
 function writeRoster(){
   if(!DB || !ready) return;
   track(FS.setDoc(teamRef,{schema:SCHEMA,roster:S.roster,at:Date.now()},{merge:true}),"roster");
