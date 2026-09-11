@@ -593,6 +593,16 @@ const benchUsed  = (g,i,card) => {
   const c = card || effCard(g);
   return benchKeys(g).some(k=>thirdsOf(c[key(i,k)]).some(Boolean));
 };
+/* Whether this GAME works in bench slots at all. An inning with an empty bench
+   is ambiguous on its own — it could be a pre-bench game, or a card you simply
+   have not finished. Games created since bench existed carry g.bslots, and any
+   game with bench data anywhere counts too. Everything else is genuinely old
+   and keeps the derived behaviour. */
+const usesBenchSlots = (g, card) => {
+  if(g.bslots) return true;
+  const c = card || effCard(g);
+  return innings(g).some(i=>benchUsed(g,i,c));
+};
 
 /* who is at each position during one third */
 function occupantsAt(g,i,t,card){
@@ -625,7 +635,7 @@ function fullPositions(g,i,card){
    and guessing at it would put made-up numbers into the season totals. */
 function benchAssigned(g,i,card){
   const c = card || effCard(g);
-  if(!benchUsed(g,i,c)) return [];
+  if(!usesBenchSlots(g,c)) return [];
   const counts={};
   benchKeys(g).forEach(k=>{
     thirdsOf(c[key(i,k)]).forEach(v=>{ if(v) counts[v]=(counts[v]||0)+1; });
@@ -636,7 +646,7 @@ function benchAssigned(g,i,card){
 function benchIn(g,i,card){
   const c = card || effCard(g);
   const counts = {};
-  if(benchUsed(g,i,c)){
+  if(usesBenchSlots(g,c)){
     benchKeys(g).forEach(k=>{
       thirdsOf(c[key(i,k)]).forEach(v=>{ if(v) counts[v]=(counts[v]||0)+1; });
     });
@@ -660,7 +670,7 @@ function dupsIn(g,i,card){
 }
 /* Present, but given no slot at all — the mistake the old derived bench hid. */
 function unplacedIn(g,i,card){
-  if(!benchUsed(g,i,card)) return [];        // legacy inning: bench was derived
+  if(!usesBenchSlots(g,card)) return [];     // genuinely old game: bench was derived
   const counts={};
   [0,1,2].forEach(t=>{
     const used = new Set(Object.values(allOccupantsAt(g,i,t,card)));
@@ -774,18 +784,22 @@ function seasonOwed(exceptId){
 }
 
 /* ---------------- Checks ---------------- */
-function runChecks(card){
+/* mode: "all" (default), "integrity" (mistakes on the card in front of you) or
+   "fairness" (balance, which is judged on the pregame plan). */
+function runChecks(card, mode){
   const g=game(); if(!g) return [];
   const c = card || effCard(g);
+  const wantErr  = mode !== "fairness";
+  const wantFair = mode !== "integrity";
   const out=[], pres=present(g), n=pres.length;
 
-  if(n < FIELD_N){
+  if(wantErr && n < FIELD_N){
     out.push({lv:"err",tag:"SHORT",msg:`Only ${n} players in. You need ${FIELD_N} to field a full defense.`});
   }
 
   // per-inning integrity
   const dupInn=[], holeInn=[], unplacedInn=[];
-  scoredList(g).forEach(i=>{
+  if(wantErr) scoredList(g).forEach(i=>{
     const d=dupsIn(g,i,c);
     if(d.size) dupInn.push(`Inn ${i}: ${[...d].map(nameOf).join(", ")}`);
     const full = fullPositions(g,i,c);
@@ -805,6 +819,12 @@ function runChecks(card){
   if(holeInn.length) out.push({lv:"err",tag:"HOLE",msg:"Position not filled — "+holeInn.join(" · ")});
   if(unplacedInn.length) out.push({lv:"err",tag:"NO SPOT",
     msg:"In but with no spot — "+unplacedInn.join(" · ")});
+
+  if(!wantFair){
+    if(!out.length) out.push({lv:"ok",tag:"SET",
+      msg:`No mistakes on this card. ${n} players, ${scoredInnings(g)} innings.`});
+    return out;
+  }
 
   // fairness
   const t=tallyGame(g,c);
@@ -856,7 +876,7 @@ function runChecks(card){
     out.push({lv:"ok",tag:"SET",msg:`Card is clean. ${n} players, ${scoredInnings(g)} innings, every spot covered.`});
   return out;
 }
-const errCount = card => runChecks(card).filter(c=>c.lv==="err").length;
+const errCount = (card, mode) => runChecks(card, mode).filter(c=>c.lv==="err").length;
 
 /* The live inning is stored on the game document so every device agrees:
    advance it on a phone and the iPad on the fence follows. */
@@ -1231,7 +1251,8 @@ function render(){
 
 function renderTabs(){
   const g0=game();
-  const e=g0?(errCount(planCard(g0)) + (hasActual(g0)?errCount(effCard(g0)):0)):0;
+  const e=g0?(errCount(planCard(g0),"integrity")
+             + (hasActual(g0)?errCount(effCard(g0),"integrity"):0)):0;
   const items=[
     ["lineup","Lineup", e?e:0],
     ["who","Who's In",0],
@@ -1314,12 +1335,17 @@ function viewLineup(g){
   /* Checks read the PREGAME card. It is the lineup you build and balance, and
      it is always whole innings, so fairness maths stay clean. The game-day card
      records what happened rather than what was planned. */
-  const checkCard = planCard(g);
-  const liveErrs  = hasActual(g) ? errCount(effCard(g)) : 0;
-  const liveFlag  = liveErrs ? `<button class="check err" data-card="live">
-      <span class="tag">GAME DAY</span>
-      <span>${liveErrs} problem${liveErrs===1?"":"s"} on the game-day card, which is the one
-      that counts. Tap to open it.</span></button>` : "";
+  /* Mistakes are reported on the card in front of you — a kid with no spot is
+     an error wherever it happens. Balance is still judged on the pregame plan,
+     which is the thing you build and which is always whole innings. */
+  const viewed    = cardMode==="live" ? effCard(g) : planCard(g);
+  const otherCard = cardMode==="live" ? planCard(g) : (hasActual(g) ? effCard(g) : null);
+  const otherErrs = otherCard ? errCount(otherCard, "integrity") : 0;
+  const liveErrs  = otherErrs;
+  const liveFlag  = liveErrs ? `<button class="check err" data-card="${cardMode==="live"?"plan":"live"}">
+      <span class="tag">${cardMode==="live"?"PREGAME":"GAME DAY"}</span>
+      <span>${liveErrs} problem${liveErrs===1?"":"s"} on the ${
+        cardMode==="live"?"pregame":"game-day"} card too. Tap to open it.</span></button>` : "";
   const owed = seasonOwed(g.id);
   const owedFlag = (owed.bench.length || owed.infield.length) ? `<div class="check info">
       <span class="tag">SEASON</span><span>${[
@@ -1328,8 +1354,10 @@ function viewLineup(g){
         owed.infield.length ? `Least infield: ${owed.infield.slice(0,3).map(r=>
             esc(r.name)+" ("+Math.round(r.infShare*100)+"%)").join(", ")}` : ""
       ].filter(Boolean).join(" \u00b7 ")}</span></div>` : "";
-  const checks = noteFlag + liveFlag + owedFlag + runChecks(checkCard).map(c=>
-    `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`).join("");
+  const paint = c => `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`;
+  const checks = noteFlag + liveFlag + owedFlag
+    + runChecks(viewed, "integrity").filter(c=>c.lv!=="ok").map(paint).join("")
+    + runChecks(planCard(g), "fairness").map(paint).join("");
 
   return `
   <div class="split">
@@ -1365,7 +1393,8 @@ function viewLineup(g){
 
   <div class="card">
     <div class="h">Checks <span class="rule"></span>
-      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">PREGAME</span></div>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${
+        cardMode==="live"?"GAME DAY":"PREGAME"} \u00b7 BALANCE FROM PREGAME</span></div>
     ${checks}
   </div>
   </div>
@@ -2147,7 +2176,7 @@ document.addEventListener("click",e=>{
       const id="g_"+when.replace(/-/g,"");
       if(S.games.some(g=>g.id===id) && !confirm("A game on "+fmtDate(when)+" already exists. Replace it?")) return;
       S.games=S.games.filter(g=>g.id!==id);
-      const g={id,date:when,opp:"",innings:innCount,out:r.out,
+      const g={id,date:when,opp:"",innings:innCount,bslots:1,out:r.out,
         order:r.order.length?r.order:S.roster.filter(p=>!r.out.includes(p.id)).map(p=>p.id),
         slots:r.slots,created:Date.parse(when)};
       S.games.push(g); reorderGames(); S.cur=id; tab="lineup";
@@ -2189,7 +2218,7 @@ document.addEventListener("click",e=>{
 function newGame(from){
   const id="g_"+Date.now().toString(36);
   const today=new Date().toISOString().slice(0,10);
-  const g={ id, date:today, opp:"", innings:from?from.innings:6,
+  const g={ id, date:today, opp:"", innings:from?from.innings:6, bslots:1,
     out:from?[...(from.out||[])]:[],
     order:from?[...(from.order||[])]:S.roster.map(p=>p.id),
     slots:{}, done:false, created:Date.now() };
@@ -2242,6 +2271,7 @@ function copyGame(g){ const o = {id:g.id,date:g.date||"",opp:g.opp||"",innings:g
   if(g.played) o.played=g.played;
   if(g.actual) o.actual={...g.actual};
   if(g.arch) o.arch=g.arch;
+  if(g.bslots) o.bslots=g.bslots;
   return o; }
 
 function refreshPicker(){
