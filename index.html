@@ -251,6 +251,14 @@ table.tally tr.flag td.l{color:var(--red-deep);font-weight:600}
 .bat .mv{border:1px solid var(--fog);border-radius:7px;width:36px;height:34px;
   font-size:15px;color:var(--steel);background:#fff}
 .bat .mv:disabled{opacity:.3}
+.bat .grip{flex:none;width:30px;text-align:center;font-size:19px;color:var(--mute);
+  touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;
+  align-self:stretch;display:flex;align-items:center;justify-content:center}
+.bat.dragging{box-shadow:0 6px 18px rgba(0,0,0,.18);border-color:var(--red);
+  position:relative;z-index:5;background:#fff}
+.bat.dragging .grip{cursor:grabbing;color:var(--red)}
+#batlist .bat{transition:transform .12s ease}
+#batlist .bat.dragging{transition:none}
 
 /* ---------- Misc controls ---------- */
 .seg{display:flex;border:1px solid var(--fog);border-radius:8px;overflow:hidden}
@@ -445,7 +453,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-03.1305";
+const BUILD  = "2026-09-11.1629";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -506,6 +514,18 @@ const nameOf = id => (byId(id)||{}).name || "?";
 const game = () => S.games.find(g=>g.id===S.cur) || null;
 const present = g => S.roster.filter(p=>!(g.out||[]).includes(p.id));
 const key = (i,p) => "i"+i+"_"+p;
+/* Move one id to a new index. Returns null for a no-op so callers can skip the
+   write rather than syncing an identical array. */
+function moveInList(arr, id, toIdx){
+  const list = (arr||[]).slice();
+  const from = list.indexOf(id);
+  if(from < 0) return null;
+  const to = Math.max(0, Math.min(list.length-1, toIdx));
+  if(to === from) return null;
+  list.splice(from,1);
+  list.splice(to,0,id);
+  return list;
+}
 
 /* Two cards per game. `slots` is the pregame plan, kept as a record. `actual`
    is the game-day card and only exists once something is changed during the
@@ -1034,11 +1054,19 @@ function toggleOut(id){
   writeGame(g);
 }
 function moveBat(id,dir){
-  const g=game(), o=g.order, i=o.indexOf(id), j=i+dir;
-  if(i<0||j<0||j>=o.length) return;
-  [o[i],o[j]]=[o[j],o[i]];
+  const g=game(), i=(g.order||[]).indexOf(id);
+  if(i<0) return;
+  const next = moveInList(g.order, id, i+dir);
+  if(!next) return;
+  g.order = next;
   commit();
-  writeGameField(g.id, "order", o.slice());
+  writeGameField(g.id, "order", next.slice());
+}
+function setOrder(ids){
+  const g=game(); if(!g) return;
+  g.order = ids.slice();
+  commit();
+  writeGameField(g.id, "order", g.order.slice());
 }
 
 /* ---------------- Notes ----------------
@@ -1110,6 +1138,7 @@ window.addEventListener("resize", measureChrome);
 window.addEventListener("orientationchange", ()=>setTimeout(measureChrome, 200));
 
 function render(){
+  if(batDrag) return;            // a redraw mid-drag would drop the row
   if(displayMode){ renderDisplay(); renderPrint(); measureChrome(); return; }
   renderTabs();
   const g=game();
@@ -1372,19 +1401,77 @@ function viewBat(g){
   present(g).forEach(p=>{ if(!order.includes(p.id)) order.push(p.id); });
   g.order=order;
   const rows=order.map((id,i)=>`
-    <div class="bat">
+    <div class="bat" data-bat="${id}">
       <div class="num"><i>${i+1}</i></div>
       <div class="nm">${esc(nameOf(id))}</div>
       <button class="mv" data-up="${id}" ${i===0?"disabled":""}>▲</button>
       <button class="mv" data-down="${id}" ${i===order.length-1?"disabled":""}>▼</button>
+      <span class="grip" data-grip="${id}" aria-hidden="true">⠿</span>
     </div>`).join("");
   return `<div class="card">
     <div class="h">Batting order <span class="rule"></span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${order.length} HITTERS</span></div>
-    <div class="sub">Everyone who's in bats, bench or not.</div>
-    ${rows||`<div class="empty">Nobody marked in yet.</div>`}
+    <div class="sub">Everyone who's in bats, bench or not. Drag by the grip, or use the arrows.</div>
+    <div id="batlist">${rows||`<div class="empty">Nobody marked in yet.</div>`}</div>
   </div>`;
 }
+
+/* --- Batting order drag ----------------------------------------------
+   Pointer events rather than HTML5 drag-and-drop, which does not fire on iOS.
+   The row is moved in the DOM as it crosses its neighbours' midpoints, and the
+   order is read back off the DOM once on release — one write, not one per swap. */
+let batDrag = null;
+
+function batDragStart(e){
+  const grip = e.target.closest("[data-grip]");
+  if(!grip) return;
+  const row = grip.closest(".bat");
+  const list = document.getElementById("batlist");
+  if(!row || !list) return;
+  e.preventDefault();
+  batDrag = { row, list, y:e.clientY, id:grip.dataset.grip, moved:false };
+  row.classList.add("dragging");
+  try{ grip.setPointerCapture(e.pointerId); }catch(err){}
+}
+
+function batDragMove(e){
+  const d = batDrag; if(!d) return;
+  e.preventDefault();
+  const dy = e.clientY - d.y;
+  d.row.style.transform = "translateY("+dy+"px)";
+
+  const others = [...d.list.querySelectorAll(".bat")].filter(r=>r!==d.row);
+  const mid = d.row.getBoundingClientRect().top + d.row.offsetHeight/2;
+  let before = null;
+  for(const r of others){
+    const rect = r.getBoundingClientRect();
+    if(mid < rect.top + rect.height/2){ before = r; break; }
+  }
+  const wasBefore = d.row.nextElementSibling;
+  if(before) d.list.insertBefore(d.row, before); else d.list.appendChild(d.row);
+  if(d.row.nextElementSibling !== wasBefore){
+    // it actually changed place: rebase so the row keeps tracking the finger
+    d.y = e.clientY;
+    d.row.style.transform = "translateY(0px)";
+    d.moved = true;
+    if(navigator.vibrate) navigator.vibrate(8);
+  }
+}
+
+function batDragEnd(){
+  const d = batDrag; if(!d) return;
+  batDrag = null;
+  d.row.classList.remove("dragging");
+  d.row.style.transform = "";
+  if(!d.moved){ render(); return; }
+  const ids = [...d.list.querySelectorAll(".bat")].map(r=>r.dataset.bat).filter(Boolean);
+  setOrder(ids);
+}
+
+document.addEventListener("pointerdown", batDragStart);
+document.addEventListener("pointermove", batDragMove, {passive:false});
+document.addEventListener("pointerup", batDragEnd);
+document.addEventListener("pointercancel", batDragEnd);
 
 /* --- Trends --- */
 const owedAvgBn = rows => rows.length ? rows.reduce((a,r)=>a+r.bnPerGame,0)/rows.length : 0;
