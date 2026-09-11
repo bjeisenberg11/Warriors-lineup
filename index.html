@@ -490,7 +490,9 @@ const G822 = {
   "CF":["Ryder","Cole","Cole","Cooper","Micah","Ryder"],
   "RF":["Owen","Huddy","Owen","Leo","Blake","Huddy"],
   "P" :["Micah","Micah","Blake","Blake","Owen","Owen"],
-  "C" :["Dawson","Dawson","Huddy","Huddy","Leo","Leo"]
+  "C" :["Dawson","Dawson","Huddy","Huddy","Leo","Leo"],
+  "BN1":["Leo","Blake","Dawson","Max O","Huddy","Rex"],
+  "BN2":["Cole","Cooper","Micah","Owen","Ryder","Blake"]
 };
 function seedGame(){
   const slots={};
@@ -618,6 +620,19 @@ function fullPositions(g,i,card){
 }
 /* Bench is still derived. Each entry carries how many thirds they sat, so a
    kid who came off after one out is not shown as having sat the inning. */
+/* Bench time from real slots only. An inning whose bench was never set
+   contributes nothing: that is a gap in the record, not six innings of sitting,
+   and guessing at it would put made-up numbers into the season totals. */
+function benchAssigned(g,i,card){
+  const c = card || effCard(g);
+  if(!benchUsed(g,i,c)) return [];
+  const counts={};
+  benchKeys(g).forEach(k=>{
+    thirdsOf(c[key(i,k)]).forEach(v=>{ if(v) counts[v]=(counts[v]||0)+1; });
+  });
+  return Object.keys(counts).map(id=>({id, name:nameOf(id), t:counts[id]}));
+}
+/* For display: falls back to the old derivation so a legacy grid is not blank. */
 function benchIn(g,i,card){
   const c = card || effCard(g);
   const counts = {};
@@ -676,7 +691,7 @@ function tallyGame(g, card){
         th[v][GRP[p]]++; th[v].pos[p]=(th[v].pos[p]||0)+1;
       });
     });
-    benchIn(g,i,c).forEach(b=>{ if(th[b.id]) th[b.id].BN += b.t; });
+    benchAssigned(g,i,c).forEach(b=>{ if(th[b.id]) th[b.id].BN += b.t; });
   });
   // report in innings so every existing caller and threshold still reads the same
   const t={};
@@ -915,6 +930,7 @@ function parseLineup(text, innCount){
 
   const slots={}, unknown=new Set(), fuzzy=[], seen={};
   const benched = new Set();
+  const benchRows = [];          // one array of names per Bench row in the sheet
   let order=[];
 
   const take = raw => {
@@ -956,12 +972,16 @@ function parseLineup(text, innCount){
       // Without this a kid who sat every inning would be recorded as absent.
       // They only corroborate, so anything unresolvable here is ignored rather
       // than reported: the header row also carries a "Bench" column label.
-      names.forEach(nm=>{
+      const rowIds = names.map(nm=>{
         const r = resolveName(nm, index);
-        if(!r.id) return;
+        if(!r.id) return null;
         if(r.fuzzy && !fuzzy.some(f=>f.from===nm)) fuzzy.push({from:nm, to:r.fuzzy});
         benched.add(r.id);
+        return r.id;
       });
+      // The header row carries a "Bench" tally column of its own; a row that
+      // resolves to nobody is not a bench row and must not consume BN1.
+      if(rowIds.some(Boolean)) benchRows.push(rowIds);
       return;
     }
 
@@ -972,14 +992,24 @@ function parseLineup(text, innCount){
     });
   });
 
+  // Bench rows are real slots now, not just proof of attendance. Without this
+   // an imported game reads as zero bench for everyone.
+  benchRows.forEach((rowIds, n)=>{
+    rowIds.forEach((id, idx)=>{ if(id) slots[key(idx+1, "BN"+(n+1))] = id; });
+  });
+
   const appeared = new Set([...Object.values(slots), ...benched]);
   const out = S.roster.filter(p=>!appeared.has(p.id)).map(p=>p.id);
   order = order.filter(id=>!out.includes(id));
 
   return {
     slots, out, order, benchOnly:[...benched].filter(id=>!Object.values(slots).includes(id)),
+    benchRows: benchRows.length,
+    benchFilled: Object.keys(slots).filter(k=>isBenchKey(k.split("_")[1])).length,
     positions: Object.keys(seen).length,
-    filled: Object.keys(slots).length,
+    // field coverage only — "54/54" should mean the nine positions are covered,
+    // not be inflated by however many bench spots the sheet happened to have
+    filled: Object.keys(slots).filter(k=>!isBenchKey(k.split("_")[1])).length,
     expected: POSK.length * innCount,
     unknown: [...unknown],
     fuzzy
@@ -2091,7 +2121,8 @@ document.addEventListener("click",e=>{
     const r=parseLineup(txt,innCount);
     const lines=[];
     lines.push(`<div class="check ${r.filled===r.expected?"ok":"warn"}"><span class="tag">${r.filled}/${r.expected}</span>
-      <span>Read ${r.positions} positions across ${innCount} innings.</span></div>`);
+      <span>Read ${r.positions} positions across ${innCount} innings${
+        r.benchRows?", plus "+r.benchFilled+" bench spots":" — no bench rows found"}.</span></div>`);
     if(r.fuzzy.length) lines.push(`<div class="check warn"><span class="tag">READ AS</span>
       <span>${r.fuzzy.map(f=>esc(f.from)+" \u2192 "+esc(f.to)).join(", ")}. Check that's right.</span></div>`);
     if(r.unknown.length) lines.push(`<div class="check err"><span class="tag">NO MATCH</span>
