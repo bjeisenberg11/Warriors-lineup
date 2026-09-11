@@ -453,7 +453,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-11.1629";
+const BUILD  = "2026-09-11.1719";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -576,10 +576,32 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const fmtDate = d => { if(!d) return "TBD";
   const [y,m,day]=d.split("-"); return m.replace(/^0/,"")+"/"+day.replace(/^0/,"")+"/"+y.slice(2); };
 
+/* ---- Bench as real slots -------------------------------------------------
+   Bench used to be derived (present minus on-field). It is now selectable like
+   any position, which is what makes "nobody assigned this kid" a detectable
+   mistake rather than an invisible one. Slot count follows attendance.
+   Games built before this exist with no BN keys at all, so each inning falls
+   back to the old derivation until its bench is actually used. */
+const benchCount = g => Math.max(0, present(g).length - FIELD_N);
+const benchKeys  = g => Array.from({length:benchCount(g)},(_,i)=>"BN"+(i+1));
+const isBenchKey = k => /^BN\d+$/.test(k);
+const allKeys    = g => POSK.concat(benchKeys(g));
+const grpOf      = k => isBenchKey(k) ? "BN" : GRP[k];
+const benchUsed  = (g,i,card) => {
+  const c = card || effCard(g);
+  return benchKeys(g).some(k=>thirdsOf(c[key(i,k)]).some(Boolean));
+};
+
 /* who is at each position during one third */
 function occupantsAt(g,i,t,card){
   const c = card || effCard(g), m={};
   POSK.forEach(p=>{ const v = thirdsOf(c[key(i,p)])[t]; if(v) m[p]=v; });
+  return m;
+}
+/* every slot, bench included — for duplicate and placement checks */
+function allOccupantsAt(g,i,t,card){
+  const c = card || effCard(g), m={};
+  allKeys(g).forEach(k=>{ const v = thirdsOf(c[key(i,k)])[t]; if(v) m[k]=v; });
   return m;
 }
 /* positions with anyone in them at all, for display and coverage */
@@ -597,11 +619,18 @@ function fullPositions(g,i,card){
 /* Bench is still derived. Each entry carries how many thirds they sat, so a
    kid who came off after one out is not shown as having sat the inning. */
 function benchIn(g,i,card){
+  const c = card || effCard(g);
   const counts = {};
-  [0,1,2].forEach(t=>{
-    const used = new Set(Object.values(occupantsAt(g,i,t,card)));
-    present(g).forEach(p=>{ if(!used.has(p.id)) counts[p.id]=(counts[p.id]||0)+1; });
-  });
+  if(benchUsed(g,i,c)){
+    benchKeys(g).forEach(k=>{
+      thirdsOf(c[key(i,k)]).forEach(v=>{ if(v) counts[v]=(counts[v]||0)+1; });
+    });
+  }else{
+    [0,1,2].forEach(t=>{
+      const used = new Set(Object.values(occupantsAt(g,i,t,c)));
+      present(g).forEach(p=>{ if(!used.has(p.id)) counts[p.id]=(counts[p.id]||0)+1; });
+    });
+  }
   return present(g).filter(p=>counts[p.id]).map(p=>({id:p.id, name:p.name, t:counts[p.id]}));
 }
 /* A player in two places at once, in any third */
@@ -609,10 +638,20 @@ function dupsIn(g,i,card){
   const dup=new Set();
   [0,1,2].forEach(t=>{
     const seen={};
-    const occ = occupantsAt(g,i,t,card);
-    POSK.forEach(p=>{ const v=occ[p]; if(!v) return; if(seen[v]) dup.add(v); seen[v]=1; });
+    const occ = allOccupantsAt(g,i,t,card);
+    Object.keys(occ).forEach(k=>{ const v=occ[k]; if(!v) return; if(seen[v]) dup.add(v); seen[v]=1; });
   });
   return dup;
+}
+/* Present, but given no slot at all — the mistake the old derived bench hid. */
+function unplacedIn(g,i,card){
+  if(!benchUsed(g,i,card)) return [];        // legacy inning: bench was derived
+  const counts={};
+  [0,1,2].forEach(t=>{
+    const used = new Set(Object.values(allOccupantsAt(g,i,t,card)));
+    present(g).forEach(p=>{ if(!used.has(p.id)) counts[p.id]=(counts[p.id]||0)+1; });
+  });
+  return present(g).filter(p=>counts[p.id]).map(p=>({id:p.id,name:p.name,t:counts[p.id]}));
 }
 /* Label for a cell: "Rex\u2154 Cole\u2153", or just the name for a whole inning */
 function cellLabel(v){
@@ -730,13 +769,15 @@ function runChecks(card){
   }
 
   // per-inning integrity
-  const dupInn=[], holeInn=[];
+  const dupInn=[], holeInn=[], unplacedInn=[];
   scoredList(g).forEach(i=>{
     const d=dupsIn(g,i,c);
     if(d.size) dupInn.push(`Inn ${i}: ${[...d].map(nameOf).join(", ")}`);
     const full = fullPositions(g,i,c);
     const holes = POSK.filter(p=>!full.includes(p));
     if(holes.length) holeInn.push(`Inn ${i}: ${holes.join(", ")}`);
+    const un = unplacedIn(g,i,c);
+    if(un.length) unplacedInn.push(`Inn ${i}: ${un.map(x=>x.name+(x.t<3?THIRD[x.t]:"")).join(", ")}`);
     // a player marked out who is still on the card
     POSK.forEach(p=>{
       thirdsOf(c[key(i,p)]).forEach(v=>{
@@ -747,6 +788,8 @@ function runChecks(card){
   });
   if(dupInn.length) out.push({lv:"err",tag:"DOUBLE",msg:"Same player twice in one inning — "+dupInn.join(" · ")});
   if(holeInn.length) out.push({lv:"err",tag:"HOLE",msg:"Position not filled — "+holeInn.join(" · ")});
+  if(unplacedInn.length) out.push({lv:"err",tag:"NO SPOT",
+    msg:"In but with no spot — "+unplacedInn.join(" · ")});
 
   // fairness
   const t=tallyGame(g,c);
@@ -1201,11 +1244,33 @@ function viewLineup(g){
     return `<tr><th class="poscell">${p.k}<small>${p.label}</small></th>${cells}</tr>`;
   }).join("");
 
-  const bench = innings(g).map(i=>{
-    const b=benchIn(g,i,card);
-    return `<td class="benchnames ${b.length?"":"none"}">${b.length
-      ? b.map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join("<br>") : "—"}</td>`;
+  const bkeys = benchKeys(g);
+  const benchRows = bkeys.map((bk,n)=>{
+    const cells = innings(g).map(i=>{
+      const raw = card[key(i,bk)];
+      if(isSplit(raw)){
+        const dup = thirdsOf(raw).some(id=>id && dupsIn(g,i,card).has(id));
+        return `<td class="cell"><button class="splitcell ${dup?"dup":""}"
+          data-split="${i}_${bk}">${esc(cellLabel(raw))||"—"}</button></td>`;
+      }
+      const val = raw || "";
+      const dup = dupsIn(g,i,card).has(val);
+      return `<td class="cell"><select class="${!val?"empty":""} ${dup?"dup":""}"
+        data-i="${i}" data-p="${bk}">${opts(val)}</select></td>`;
+    }).join("");
+    return `<tr class="benchrow"><th class="poscell">${bk}<small>Bench</small></th>${cells}</tr>`;
   }).join("");
+
+  // legacy games have no bench data; show what it used to derive so the grid
+  // is not simply blank for every past card
+  const legacy = innings(g).some(i=>!benchUsed(g,i,card));
+  const legacyRow = legacy ? `<tr class="benchrow"><th class="poscell">—<small>Not set</small></th>${
+    innings(g).map(i=>{
+      const b = benchUsed(g,i,card) ? [] : benchIn(g,i,card);
+      return `<td class="benchnames ${b.length?"":"none"}">${b.length
+        ? b.map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join("<br>") : ""}</td>`;
+    }).join("")}</tr>` : "";
+  const bench = benchRows + legacyRow;
 
   const unread = unreadNotes();
   const noteFlag = unread ? `<button class="check note-flag" data-tab="notes">
@@ -1248,7 +1313,7 @@ function viewLineup(g){
           diffs?` <b>${diffs}</b>`:""}</button>
       </div>
     </div>
-    <div class="sub">${cardMode==="live"
+    <div class="sub">${bkeys.length?`Bench is ${bkeys.length} spot${bkeys.length===1?"":"s"} an inning — set them like any position. `:""}${cardMode==="live"
       ? (hasActual(g)
           ? `Changes here don't touch the pregame plan. Stats and trends use this card.`
           : `Same as the pregame plan until you change something. Stats and trends use this card.`)
@@ -1257,9 +1322,7 @@ function viewLineup(g){
     <div class="gridscroll">
       <table class="grid">
         <thead><tr><th class="poscell" style="border-bottom:1px solid var(--fog)"></th>${head}</tr></thead>
-        <tbody>${rows}
-          <tr class="benchrow"><th class="poscell">BN<small>Bench</small></th>${bench}</tr>
-        </tbody>
+        <tbody>${rows}${bench}</tbody>
       </table>
     </div>
     <div class="rotatehint">Turn the phone sideways and the tally moves alongside the grid,
