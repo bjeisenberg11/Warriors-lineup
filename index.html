@@ -166,6 +166,8 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 }
 
 /* ---------- Checks ---------- */
+.why{font-size:10px;line-height:1.15;color:var(--red-deep);font-weight:600;
+  margin:0 0 2px;padding:0 2px;letter-spacing:.01em;max-width:150px}
 button.splitcell{width:100%;min-width:96px;border:1px solid var(--fog);border-radius:6px;
   background:#FFFDF7;padding:7px 6px;font-size:13px;text-align:left;line-height:1.25;
   border-left:3px solid var(--amber)}
@@ -453,7 +455,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-11.1803";
+const BUILD  = "2026-09-11.1814";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -664,23 +666,52 @@ function benchIn(g,i,card){
 }
 /* A player in two places at once, in any third */
 function dupsIn(g,i,card){
-  const dup=new Set();
-  [0,1,2].forEach(t=>{
-    const seen={};
-    const occ = allOccupantsAt(g,i,t,card);
-    Object.keys(occ).forEach(k=>{ const v=occ[k]; if(!v) return; if(seen[v]) dup.add(v); seen[v]=1; });
-  });
-  return dup;
+  const total = inningThirds(g,i,card);
+  return new Set(Object.keys(total).filter(id=>total[id].n > 3));
 }
+/* The three entries in a split cell are AMOUNTS, not a timeline. A coach
+   records "Cooper pitched two thirds", not "Cooper pitched the 1st and 2nd
+   thirds". Conflicts are therefore judged on totals: a player is double-booked
+   only if their thirds across every slot in an inning add up to more than one
+   inning. Treating slot 1 of one cell as simultaneous with slot 1 of another
+   produced false duplicates on perfectly sound cards. */
+function inningThirds(g,i,card){
+  const c = card || effCard(g);
+  const total = {};
+  allKeys(g).forEach(k=>{
+    thirdsOf(c[key(i,k)]).forEach(v=>{
+      if(!v) return;
+      total[v] = total[v] || {n:0, at:{}};
+      total[v].n++;
+      total[v].at[k] = (total[v].at[k]||0)+1;
+    });
+  });
+  return total;
+}
+/* Every clash in one inning: which player, which two slots, which thirds.
+   "Red" on its own is not an explanation. */
+function dupDetail(g,i,card){
+  const total = inningThirds(g,i,card);
+  return Object.keys(total).filter(id=>total[id].n > 3).map(id=>({
+    id, n: total[id].n, slots: Object.keys(total[id].at), at: total[id].at
+  }));
+}
+/* The reason one cell is red, in words. */
+function cellConflict(g,i,slotKey,card){
+  return dupDetail(g,i,card)
+    .filter(d=>d.slots.includes(slotKey))
+    .map(d=>nameOf(d.id)+" adds to "+fmtInn(d.n/3)+" ("+
+      d.slots.map(k=>k+" "+fmtInn(d.at[k]/3)).join(", ")+")")
+    .join("; ");
+}
+
 /* Present, but given no slot at all — the mistake the old derived bench hid. */
 function unplacedIn(g,i,card){
   if(!usesBenchSlots(g,card)) return [];     // genuinely old game: bench was derived
-  const counts={};
-  [0,1,2].forEach(t=>{
-    const used = new Set(Object.values(allOccupantsAt(g,i,t,card)));
-    present(g).forEach(p=>{ if(!used.has(p.id)) counts[p.id]=(counts[p.id]||0)+1; });
-  });
-  return present(g).filter(p=>counts[p.id]).map(p=>({id:p.id,name:p.name,t:counts[p.id]}));
+  const total = inningThirds(g,i,card);
+  return present(g)
+    .filter(p=>((total[p.id]||{}).n||0) < 3)
+    .map(p=>({id:p.id, name:p.name, t: 3 - (((total[p.id]||{}).n)||0)}));
 }
 /* Label for a cell: "Rex\u2154 Cole\u2153", or just the name for a whole inning */
 function cellLabel(v){
@@ -804,13 +835,16 @@ function runChecks(card, mode){
   // per-inning integrity
   const dupInn=[], holeInn=[], unplacedInn=[];
   if(wantErr) scoredList(g).forEach(i=>{
-    const d=dupsIn(g,i,c);
-    if(d.size) dupInn.push(`Inn ${i}: ${[...d].map(nameOf).join(", ")}`);
+    const dd=dupDetail(g,i,c);
+    if(dd.length) dupInn.push(`Inn ${i}: ${dd.map(x=>
+      nameOf(x.id)+" "+fmtInn(x.n/3)+" ("+x.slots.map(k=>k+" "+fmtInn(x.at[k]/3)).join(", ")+")"
+    ).join("; ")}`);
     const full = fullPositions(g,i,c);
     const holes = POSK.filter(p=>!full.includes(p));
     if(holes.length) holeInn.push(`Inn ${i}: ${holes.join(", ")}`);
     const un = unplacedIn(g,i,c);
-    if(un.length) unplacedInn.push(`Inn ${i}: ${un.map(x=>x.name+(x.t<3?THIRD[x.t]:"")).join(", ")}`);
+    if(un.length) unplacedInn.push(`Inn ${i}: ${un.map(x=>
+      x.name+" short "+fmtInn(x.t/3)).join(", ")}`);
     // a player marked out who is still on the card
     POSK.forEach(p=>{
       thirdsOf(c[key(i,p)]).forEach(v=>{
@@ -819,10 +853,11 @@ function runChecks(card, mode){
       });
     });
   });
-  if(dupInn.length) out.push({lv:"err",tag:"DOUBLE",msg:"Same player twice in one inning — "+dupInn.join(" · ")});
+  if(dupInn.length) out.push({lv:"err",tag:"OVER",
+    msg:"More than a full inning in one inning — "+dupInn.join(" · ")});
   if(holeInn.length) out.push({lv:"err",tag:"HOLE",msg:"Position not filled — "+holeInn.join(" · ")});
   if(unplacedInn.length) out.push({lv:"err",tag:"NO SPOT",
-    msg:"In but with no spot — "+unplacedInn.join(" · ")});
+    msg:"Not accounted for the whole inning — "+unplacedInn.join(" · ")});
 
   if(!wantFair){
     if(!out.length) out.push({lv:"ok",tag:"SET",
@@ -1290,14 +1325,15 @@ function viewLineup(g){
   const rows = POS.map(p=>{
     const cells = innings(g).map(i=>{
       const raw = card[key(i,p.k)];
+      const why = cellConflict(g,i,p.k,card);
       if(isSplit(raw)){
-        const dup = thirdsOf(raw).some(id=>id && dupsIn(g,i,card).has(id));
-        return `<td class="cell"><button class="splitcell ${dup?"dup":""}"
+        return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<button
+          class="splitcell ${why?"dup":""}" title="${esc(why)}"
           data-split="${i}_${p.k}">${esc(cellLabel(raw))||"\u2014"}</button></td>`;
       }
       const val = raw || "";
-      const dup = dupsIn(g,i,card).has(val);
-      return `<td class="cell"><select class="${!val?"empty":""} ${dup?"dup":""}"
+      return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<select
+        class="${!val?"empty":""} ${why?"dup":""}" title="${esc(why)}"
         data-i="${i}" data-p="${p.k}">${opts(val)}</select></td>`;
     }).join("");
     return `<tr><th class="poscell">${p.k}<small>${p.label}</small></th>${cells}</tr>`;
@@ -1307,14 +1343,15 @@ function viewLineup(g){
   const benchRows = bkeys.map((bk,n)=>{
     const cells = innings(g).map(i=>{
       const raw = card[key(i,bk)];
+      const why = cellConflict(g,i,bk,card);
       if(isSplit(raw)){
-        const dup = thirdsOf(raw).some(id=>id && dupsIn(g,i,card).has(id));
-        return `<td class="cell"><button class="splitcell ${dup?"dup":""}"
+        return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<button
+          class="splitcell ${why?"dup":""}" title="${esc(why)}"
           data-split="${i}_${bk}">${esc(cellLabel(raw))||"—"}</button></td>`;
       }
       const val = raw || "";
-      const dup = dupsIn(g,i,card).has(val);
-      return `<td class="cell"><select class="${!val?"empty":""} ${dup?"dup":""}"
+      return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<select
+        class="${!val?"empty":""} ${why?"dup":""}" title="${esc(why)}"
         data-i="${i}" data-p="${bk}">${opts(val)}</select></td>`;
     }).join("");
     return `<tr class="benchrow"><th class="poscell">${bk}<small>Bench</small></th>${cells}</tr>`;
@@ -1487,7 +1524,8 @@ function viewSplit(){
     <div class="sheetbox">
       <div class="h">${p} \u00b7 ${esc(label)} <span class="rule"></span>
         <span style="font-family:var(--mono);font-size:12px;color:var(--mute)">INN ${i}</span></div>
-      <div class="sub">Thirds of an inning, counted like innings pitched.</div>
+      <div class="sub">How much of the inning each kid had here. Order doesn't matter —
+        the same name twice is two thirds.</div>
       ${row(0,"First \u2153")}${row(1,"Second \u2153")}${row(2,"Last \u2153")}
       <div class="row" style="margin-top:11px">
         <button class="btn ghost" id="splitWhole">Whole inning</button>
