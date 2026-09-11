@@ -137,6 +137,12 @@ td.cell select{
 td.cell select.empty{color:var(--mute);background:#FAFBFC;border-style:dashed}
 td.cell select.dup{border-color:var(--red);border-width:2px;background:var(--red-wash);
   color:var(--red-deep);font-weight:600}
+tr.unrow td{background:#FFF7F8;border-top:1px solid var(--fog)}
+tr.unrow .poscell{background:#FFF7F8;color:var(--red-deep)}
+tr.unrow .poscell small{color:var(--red-deep);opacity:.75}
+.unnames{font-size:13px;color:var(--red-deep);font-weight:600;padding:8px 5px;
+  text-align:center;line-height:1.25;min-width:96px}
+.unnames.done{color:var(--good);font-weight:400}
 tr.benchrow td{background:#FAFAFB}
 tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
 .benchnames{font-size:13px;color:var(--steel);padding:8px 5px;text-align:center;
@@ -184,6 +190,8 @@ button.splitcell.dup{border-color:var(--red);background:var(--red-wash);color:va
 
 .cardsw{margin:-2px 0 9px}
 .cardsw .seg{max-width:280px}
+.cardsw .copyplan{margin-top:7px;padding:7px 11px;font-size:13px;width:100%;
+  border-style:dashed;color:var(--steel)}
 .cardsw .seg button b{font-family:var(--mono);font-size:11px;font-weight:600;
   background:rgba(255,255,255,.28);border-radius:8px;padding:0 5px;margin-left:3px}
 .cardsw .seg button:not(.on) b{background:var(--fog);color:var(--steel)}
@@ -455,7 +463,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-11.1814";
+const BUILD  = "2026-09-11.2158";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1149,6 +1157,22 @@ function setThird(i,p,t,val){
   a[t] = val || null;
   setSlot(i,p,packThirds(a));
 }
+/* The game-day card forks from the plan on first edit. After that the two
+   drift, and until now there was no way back. */
+function copyPlanToLive(){
+  const g=game(); if(!g) return;
+  const n=cardDiff(g);
+  if(hasActual(g) && !confirm(
+      "Replace the game-day card with the pregame lineup?"+
+      (n?" "+n+" spot"+(n===1?"":"s")+" will change.":"")+
+      " The pregame plan is not affected.")) return;
+  g.actual = Object.assign({}, g.slots);
+  cardMode = "live";
+  commit();
+  writeGameField(g.id, "actual", g.actual);
+  note("game-day card reset to the pregame plan");
+}
+
 function collapseSlot(i,p){
   const g=game(); const k=key(i,p);
   const card = cardMode==="live" ? effCard(g) : planCard(g);
@@ -1359,14 +1383,27 @@ function viewLineup(g){
 
   // legacy games have no bench data; show what it used to derive so the grid
   // is not simply blank for every past card
-  const legacy = innings(g).some(i=>!benchUsed(g,i,card));
-  const legacyRow = legacy ? `<tr class="benchrow"><th class="poscell">—<small>Not set</small></th>${
+  // Only a game that has never used bench slots gets the derived row. Gating
+   // this per inning left a tall empty row on any card with bench half filled.
+   /* Who still has nowhere to be, inning by inning, right under the grid — the
+     Checks panel says the same thing but it is off-screen while you work. */
+  const unRow = usesBenchSlots(g,card) ? `<tr class="unrow">
+    <th class="poscell">!<small>Unassigned</small></th>${
     innings(g).map(i=>{
-      const b = benchUsed(g,i,card) ? [] : benchIn(g,i,card);
+      const un = unplacedIn(g,i,card);
+      return `<td class="unnames ${un.length?"":"done"}">${un.length
+        ? un.map(x=>esc(x.name)+(x.t<3?" "+fmtInn(x.t/3):"")).join("<br>")
+        : "\u2713"}</td>`;
+    }).join("")}</tr>` : "";
+
+  const legacy = !usesBenchSlots(g,card);
+  const legacyRow = legacy ? `<tr class="benchrow"><th class="poscell">BN<small>Derived</small></th>${
+    innings(g).map(i=>{
+      const b = benchIn(g,i,card);
       return `<td class="benchnames ${b.length?"":"none"}" title="Derived, not counted">${b.length
         ? b.map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join("<br>") : ""}</td>`;
     }).join("")}</tr>` : "";
-  const bench = benchRows + legacyRow;
+  const bench = benchRows + unRow + legacyRow;
 
   const unread = unreadNotes();
   const noteFlag = unread ? `<button class="check note-flag" data-tab="notes">
@@ -1415,6 +1452,9 @@ function viewLineup(g){
         <button class="${cardMode==="live"?"on":""}" data-card="live">Game day${
           diffs?` <b>${diffs}</b>`:""}</button>
       </div>
+      ${cardMode==="live"?`<button class="btn ghost copyplan" id="copyPlan">${
+        hasActual(g) ? "\u21ba Reset to pregame lineup" : "\u21ba Start from pregame lineup"
+      }</button>`:""}
     </div>
     <div class="sub">${bkeys.length?`Bench is ${bkeys.length} spot${bkeys.length===1?"":"s"} an inning — set them like any position. `:""}${cardMode==="live"
       ? (hasActual(g)
@@ -2167,6 +2207,7 @@ document.addEventListener("click",e=>{
   }
   else if(b.id==="ovl"){ splitCell=null; render(); }
   else if(b.dataset.trend){ trendMode = b.dataset.trend; render(); }
+  else if(b.id==="copyPlan") copyPlanToLive();
   else if(b.dataset.card){ cardMode = b.dataset.card; tab="lineup"; render(); }
   else if(b.dataset.ha !== undefined){
     const g=game(); g.ha=b.dataset.ha||"";
