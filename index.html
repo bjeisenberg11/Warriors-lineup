@@ -453,7 +453,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-11.1745";
+const BUILD  = "2026-09-11.1803";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -642,11 +642,15 @@ function benchAssigned(g,i,card){
   });
   return Object.keys(counts).map(id=>({id, name:nameOf(id), t:counts[id]}));
 }
-/* For display: falls back to the old derivation so a legacy grid is not blank. */
+/* For display only. Falls back per INNING, not per game: an inning whose bench
+   was never set still shows who was sitting, even if another inning of the same
+   game has been filled in. Counting deliberately does not do this — see
+   benchAssigned — because a derived name is a guess, fine to look at but not to
+   put in a season total. */
 function benchIn(g,i,card){
   const c = card || effCard(g);
   const counts = {};
-  if(usesBenchSlots(g,c)){
+  if(benchUsed(g,i,c)){
     benchKeys(g).forEach(k=>{
       thirdsOf(c[key(i,k)]).forEach(v=>{ if(v) counts[v]=(counts[v]||0)+1; });
     });
@@ -1322,7 +1326,7 @@ function viewLineup(g){
   const legacyRow = legacy ? `<tr class="benchrow"><th class="poscell">—<small>Not set</small></th>${
     innings(g).map(i=>{
       const b = benchUsed(g,i,card) ? [] : benchIn(g,i,card);
-      return `<td class="benchnames ${b.length?"":"none"}">${b.length
+      return `<td class="benchnames ${b.length?"":"none"}" title="Derived, not counted">${b.length
         ? b.map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join("<br>") : ""}</td>`;
     }).join("")}</tr>` : "";
   const bench = benchRows + legacyRow;
