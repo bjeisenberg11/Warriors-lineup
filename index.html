@@ -230,6 +230,9 @@ table.tally td{padding:7px 3px;text-align:center;border-bottom:1px solid #EEF0F2
   font-family:var(--mono);font-size:13px}
 table.tally td.l{font-family:var(--body);font-size:14px;font-weight:500;white-space:nowrap}
 table.tally td.z{color:#C3C8CE}
+table.tally th.key,table.tally td.key{background:#FAFAFB}
+table.tally td.key{font-weight:600;color:var(--ink)}
+table.tally th.key{color:var(--steel)}
 table.tally tr.flag td.l{color:var(--red-deep);font-weight:600}
 .bar{display:inline-block;height:7px;border-radius:4px;background:var(--red);vertical-align:1px}
 .bar.g{background:var(--steel)}
@@ -463,7 +466,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-11.2158";
+const BUILD  = "2026-09-12.0231";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -795,16 +798,24 @@ function priorGames(){
    Every fairness check until now looked at today or yesterday, so a kid could
    sit twice in games 1, 3, 5 and 7 and trip nothing. This is the running
    picture: thirds on the bench and share of infield across the season. */
-function seasonTotals(exceptId){
-  const list = liveGames().filter(x=>x.id!==exceptId);
-  const t = tallyMany(list, "live");
+/* The games the season picture is built from. Today is excluded by default:
+   you are deciding today, and a half-built card would move the numbers while
+   you read them. The Checks line and the Trends table both come through here,
+   so they cannot drift apart the way two separate tables did. */
+function seasonGames(exceptId, includeToday){
+  const list = liveGames();
+  return includeToday ? list : list.filter(x=>x.id!==exceptId);
+}
+function seasonTotals(exceptId, mode, includeToday){
+  const list = seasonGames(exceptId, includeToday);
+  const t = tallyMany(list, mode || "live");
   const rows = [];
   S.roster.forEach(p=>{
     const r = t[p.id];
     if(!r || !r.games) return;
     const played = r.INF + r.OF;
     rows.push({ id:p.id, name:p.name, games:r.games,
-                INF:r.INF, OF:r.OF, BN:r.BN,
+                INF:r.INF, OF:r.OF, BN:r.BN, pos:r.pos||{},
                 infShare: played ? r.INF/played : 0,
                 bnPerGame: r.games ? r.BN/r.games : 0 });
   });
@@ -812,7 +823,7 @@ function seasonTotals(exceptId){
 }
 /* Who is owed: most bench per game, and least infield share. */
 function seasonOwed(exceptId){
-  const rows = seasonTotals(exceptId);
+  const rows = seasonTotals(exceptId);      // today excluded, as above
   if(rows.length < 2) return {bench:[], infield:[], rows};
   const avgBn  = rows.reduce((a,r)=>a+r.bnPerGame,0)/rows.length;
   const avgInf = rows.reduce((a,r)=>a+r.infShare,0)/rows.length;
@@ -1685,76 +1696,77 @@ document.addEventListener("pointercancel", batDragEnd);
 const owedAvgBn = rows => rows.length ? rows.reduce((a,r)=>a+r.bnPerGame,0)/rows.length : 0;
 
 function viewTrends(g){
-  const prior=priorGames();
-  const inc=document.body.dataset.incCur==="1";
-  const list=inc?[...prior,g]:prior;
+  const incToday = document.body.dataset.incCur==="1";
+  const list = seasonGames(g.id, incToday);
   if(!list.length) return `<div class="card"><div class="empty">
-    No earlier games on file yet. Add one under <b>Game</b> to start the history.</div></div>`;
+    No games counted yet. ${liveGames().length>1?"Turn on <b>Include today</b> to see this one.":
+    "Add a game under <b>Game</b> to start the history."}</div></div>`;
 
-  const t=tallyMany(list, trendMode);
+  const rows      = seasonTotals(g.id, trendMode, incToday);
   const anyForked = list.some(hasActual);
-  const cols=POSK.concat(["BN"]);
-  const rows=S.roster.map(p=>{
-    const r=t[p.id]; if(!r||!r.games) return "";
-    const tot=r.INF+r.OF+r.BN;
-    const cells=cols.map(k=>{
-      const n = k==="BN" ? r.BN : (r.pos[k]||0);
-      return `<td class="${n?"":"z"}">${n?(Number.isInteger(n)?n:fmtInn(n)):0}</td>`;
+  const avgBn     = owedAvgBn(rows);
+  const sorted    = rows.slice().sort((a,b)=>b.bnPerGame-a.bnPerGame);
+
+  const num = v => v ? (Number.isInteger(v) ? v : fmtInn(v)) : 0;
+
+  const body = sorted.map(r=>{
+    const heavyBench = r.bnPerGame > avgBn + 1/3;
+    const cells = POSK.map(k=>{
+      const n = r.pos[k]||0;
+      return `<td class="${n?"":"z"}">${num(n)}</td>`;
     }).join("");
-    const lowOpp = tot && (r.INF/Math.max(1,tot)) < .34;
-    return `<tr class="${lowOpp?"flag":""}"><td class="l">${esc(p.name)}</td>${cells}
-      <td style="font-weight:600">${Number.isInteger(r.INF)?r.INF:fmtInn(r.INF)}</td>
-      <td style="font-weight:600">${Number.isInteger(r.OF)?r.OF:fmtInn(r.OF)}</td></tr>`;
+    return `<tr class="${heavyBench?"flag":""}">
+      <td class="l">${esc(r.name)}</td>
+      <td>${r.games}</td>
+      <td class="key">${r.bnPerGame.toFixed(2)}</td>
+      <td class="key">${Math.round(r.infShare*100)}%</td>
+      <td>${num(r.BN)}</td>
+      <td>${num(r.INF)}</td>
+      <td>${num(r.OF)}</td>
+      ${cells}</tr>`;
   }).join("");
 
-  const season = seasonTotals(null).sort((a,b)=>b.bnPerGame-a.bnPerGame);
-  const seasonCard = season.length ? `<div class="card">
+  return `<div class="card">
     <div class="h">Season so far <span class="rule"></span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${
-        liveGames().length} GAME${liveGames().length===1?"":"S"}</span></div>
-    <div class="sub">Running totals. This is the one that answers who's owed.</div>
-    <table class="tally">
-      <thead><tr><th class="l">Player</th><th>G</th><th>Inf</th><th>Out</th><th>Bn</th>
-        <th>Bn/G</th><th>Inf%</th></tr></thead>
-      <tbody>${season.map(r=>`<tr class="${
-        r.bnPerGame > (owedAvgBn(season)+1/3) ? "flag" : ""}">
-        <td class="l">${esc(r.name)}</td>
-        <td>${r.games}</td>
-        <td>${fmtInn(r.INF)}</td>
-        <td>${fmtInn(r.OF)}</td>
-        <td>${fmtInn(r.BN)}</td>
-        <td>${r.bnPerGame.toFixed(2)}</td>
-        <td>${Math.round(r.infShare*100)}%</td></tr>`).join("")}</tbody>
-    </table>
-    <div class="hint">Bn/G is bench innings per game played. Red means noticeably
-      more bench than the team average.</div>
-  </div>` : "";
+        list.length} GAME${list.length===1?"":"S"}</span></div>
+    <div class="sub">${incToday
+      ? "Today's card is included \u2014 the numbers will move as you fill it in."
+      : "Today excluded, so this answers who's owed going in."}${
+      anyForked && trendMode==="plan" ? " Showing pregame lineups, not what was played." : ""}</div>
 
-  return seasonCard + `<div class="card">
-    <div class="h">Rotation history <span class="rule"></span></div>
-    ${anyForked?`<div class="cardsw"><div class="seg">
-      <button class="${trendMode==="live"?"on":""}" data-trend="live">What happened</button>
-      <button class="${trendMode==="plan"?"on":""}" data-trend="plan">As planned</button>
-    </div></div>`:""}
-    <div class="sub">${list.length} game${list.length>1?"s":""} · innings by position${
-      anyForked && trendMode==="plan" ? " · pregame lineups, not what was played" : ""}</div>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn ${incToday?"primary":"ghost"}" id="incCur">${
+        incToday?"Today included":"Include today"}</button>
+      ${anyForked?`<div class="seg" style="flex:1">
+        <button class="${trendMode==="live"?"on":""}" data-trend="live">What happened</button>
+        <button class="${trendMode==="plan"?"on":""}" data-trend="plan">As planned</button>
+      </div>`:""}
+    </div>
+
     <div class="gridscroll">
       <table class="tally" style="width:max-content;min-width:100%">
-        <thead><tr><th class="l">Player</th>${cols.map(c=>`<th>${c}</th>`).join("")}
-        <th>INF</th><th>OF</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <thead><tr>
+          <th class="l">Player</th><th>G</th>
+          <th class="key">Bn/G</th><th class="key">Inf%</th>
+          <th>BN</th><th>INF</th><th>OF</th>
+          ${POSK.map(c=>`<th>${c}</th>`).join("")}
+        </tr></thead>
+        <tbody>${body}</tbody>
       </table>
     </div>
-    <div class="hint">Names in red have had under a third of their innings in the infield across these games.</div>
-    <div class="row" style="margin-top:10px">
-      <button class="btn ghost" id="incCur">${inc?"Hide":"Include"} today's card</button>
-    </div>
+    <div class="hint">Bn/G is bench innings per game played; Inf% is share of innings
+      on the field spent in the infield. Red is noticeably more bench than the team
+      average. Part-innings read like innings pitched \u2014 2.1 is two and a third.</div>
   </div>
+
   <div class="card">
     <div class="h">Games counted <span class="rule"></span></div>
-    ${list.map(x=>`<div style="font-size:14px;padding:6px 0;border-bottom:1px solid #EEF0F2">
-      <b>${fmtDate(x.date)}</b> ${x.opp?"vs "+esc(x.opp):"<span style='color:var(--mute)'>no opponent</span>"}
-      ${x.id===g.id?" <span style='color:var(--red);font-size:12px'>· today</span>":""}</div>`).join("")}
+    ${list.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(x=>
+      `<div style="font-size:14px;padding:6px 0;border-bottom:1px solid #EEF0F2">
+      <b>${fmtDate(x.date)}</b> ${x.opp?esc(vsLabel(x)):"<span style='color:var(--mute)'>no opponent</span>"}
+      ${endedEarly(x)?` <span style='color:var(--steel);font-size:12px'>\u00b7 ${scoredInnings(x)} of ${x.innings} innings</span>`:""}
+      ${x.id===g.id?" <span style='color:var(--red);font-size:12px'>\u00b7 today</span>":""}</div>`).join("")}
   </div>`;
 }
 
