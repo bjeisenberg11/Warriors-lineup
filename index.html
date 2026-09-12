@@ -237,7 +237,7 @@ table.tally td.z{color:#C3C8CE}
   font-weight:600;color:var(--steel);background:#fff}
 .tgl.on{background:var(--ink);border-color:var(--ink);color:#fff}
 .tglnote{font-size:12px;color:var(--mute);margin-left:auto}
-.plist{margin:0 -3px}
+.slist{margin:0 -3px}
 .prow{display:flex;align-items:center;gap:9px;width:100%;padding:9px 3px;
   border-bottom:1px solid #EEF0F2;text-align:left;background:none}
 .prow.open{border-bottom-color:transparent}
@@ -490,7 +490,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-12.0243";
+const BUILD  = "2026-09-12.0253";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1765,7 +1765,7 @@ function viewTrends(g){
         ? "moves as you fill today's card"
         : "who's owed going in"}</span>
     </div>
-    <div class="plist">${body}</div>
+    <div class="slist">${body}</div>
     <div class="hint">Sorted by bench per game. Red is noticeably above the team average.
       Tap a name for positions.</div>
   </div>
