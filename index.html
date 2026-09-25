@@ -194,6 +194,34 @@ button.splitcell.dup{border-color:var(--red);background:var(--red-wash);color:va
 .srow select{flex:1;border:1px solid var(--fog);border-radius:8px;padding:9px 10px;background:#fff}
 @media (orientation:landscape) and (max-height:620px){.ovl{align-items:center}}
 
+.hbtn{width:100%;text-align:left;background:none;padding:0}
+.hbtn .caret{font-family:var(--mono);font-size:17px;color:var(--mute);
+  width:22px;text-align:center;flex:none}
+.pref{margin:2px 0 0}
+.prow2{display:flex;align-items:center;gap:9px;padding:7px 2px;
+  border-bottom:1px solid #EEF0F2}
+.prow2:last-child{border-bottom:none}
+.prow2.none .pn{color:var(--mute)}
+.pn{font-size:15px;font-weight:600;flex:0 0 78px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.pslots{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+.pslot{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:.04em;
+  padding:4px 9px;border-radius:6px;border:1px solid transparent;line-height:1.15}
+.pslot.pri{background:var(--red);color:#fff}
+.pslot.sec{background:#F1F3F5;color:var(--steel)}
+.pslot.off{background:#fff;color:#C3C8CE;border-color:var(--fog)}
+.pk{font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.04em;
+  background:var(--ink);color:#fff;border-radius:6px;padding:3px 0;
+  flex:0 0 42px;text-align:center}
+.pk.thin{background:var(--amber)}
+.pnames{flex:1;font-size:14px;color:var(--steel);line-height:1.35}
+.pnames b{font-weight:500}
+.pnames b.pri{font-weight:700;color:var(--ink)}
+.pnames i{color:var(--mute)}
+.pdeep{font-family:var(--mono);font-size:12px;color:var(--mute);flex:0 0 18px;
+  text-align:right}
+.pdeep.thin{color:var(--amber);font-weight:600}
+
 .cardsw{margin:-2px 0 9px}
 .cardsw .seg{max-width:280px}
 .cardsw .copyplan{margin-top:7px;padding:7px 11px;font-size:13px;width:100%;
@@ -509,7 +537,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-23.0253";
+const BUILD  = "2026-09-25.0033";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -534,7 +562,14 @@ const FIELD_N = POS.length;
 const SEED_NAMES = ["Cole","Max O","Leo","Rex","Dawson","Micah","Ryder","Cooper","Owen","Huddy","Blake","Isaac"];
 const pid = n => "p_" + n.toLowerCase().replace(/[^a-z0-9]/g,"");
 
-const SEED_ROSTER = SEED_NAMES.map(n=>({id:pid(n),name:n}));
+/* Agreed 9/25/26. Primary first; OF covers all three outfield spots. */
+const SEED_POS = {
+  "Dawson":["C","1B","SS"],  "Huddy":["C","2B","3B"],  "Leo":["C","3B","OF"],
+  "Blake":["1B","OF"],       "Micah":["1B","SS","3B"], "Cole":["2B","SS","OF"],
+  "Cooper":["2B","SS"],      "Max O":["2B","1B","OF"], "Owen":["2B","OF"],
+  "Ryder":["OF","2B"],       "Rex":["SS","OF"],        "Isaac":["3B","SS"]
+};
+const SEED_ROSTER = SEED_NAMES.map(n=>({id:pid(n),name:n,pos:SEED_POS[n]||[]}));
 
 // 8/22/26 lineup, transcribed from the spreadsheet. Isaac was out.
 const G822 = {
@@ -572,6 +607,26 @@ const nameOf = id => (byId(id)||{}).name || "?";
 const game = () => S.games.find(g=>g.id===S.cur) || null;
 const present = g => S.roster.filter(p=>!(g.out||[]).includes(p.id));
 const key = (i,p) => "i"+i+"_"+p;
+
+/* ---- Position assignments -------------------------------------------------
+   Each kid has 2-3 spots, primary first. The three outfield spots are one
+   assignment ("OF") because they are interchangeable at this age. Pitcher sits
+   outside the scheme: it rotates on top of whatever else a kid plays, so P is
+   open to everyone and never counts toward the 2-3. */
+const ASSIGN_SLOTS = ["C","1B","2B","3B","SS","OF"];
+const OF_KEYS = ["LF","CF","RF"];
+const slotOf = k => OF_KEYS.includes(k) ? "OF" : k;      // grid key -> assignment
+const posOfPlayer = id => (byId(id)||{}).pos || [];
+/* P and the bench are open to anyone; everything else goes by the list. */
+const openSlot = k => k === "P" || isBenchKey(k);
+const eligible = (id, k) => openSlot(k) || posOfPlayer(id).includes(slotOf(k));
+const isPrimary = (id, k) => !openSlot(k) && posOfPlayer(id)[0] === slotOf(k);
+/* Everyone listed for a slot, primaries first, in roster order. */
+function playersFor(slot){
+  const pri = S.roster.filter(p=>(p.pos||[])[0]===slot);
+  const sec = S.roster.filter(p=>(p.pos||[]).includes(slot) && (p.pos||[])[0]!==slot);
+  return pri.concat(sec);
+}
 /* Move one id to a new index. Returns null for a no-op so callers can skip the
    write rather than syncing an identical array. */
 function moveInList(arr, id, toIdx){
@@ -1388,9 +1443,21 @@ function viewLineup(g){
   const pres=present(g);
   const card  = cardMode==="live" ? effCard(g) : planCard(g);
   const diffs = cardDiff(g);
-  const opts = id => `<option value="">—</option>` + pres.map(p=>
-      `<option value="${p.id}" ${p.id===id?"selected":""}>${esc(p.name)}</option>`).join("") +
-      (cardMode==="live" ? `<option value="__split">Split innings…</option>` : "");
+  /* The list is grouped so the kids who play this spot are the ones you see
+     first — that is the whole point of having assignments. */
+  const opts = (id, slotKey) => {
+    const o = p => `<option value="${p.id}" ${p.id===id?"selected":""}>${esc(p.name)}</option>`;
+    const tail = cardMode==="live" ? `<option value="__split">Split innings…</option>` : "";
+    if(!slotKey || openSlot(slotKey))
+      return `<option value="">—</option>` + pres.map(o).join("") + tail;
+    const slot = slotOf(slotKey);
+    const fits = pres.filter(p=>(p.pos||[]).includes(slot));
+    const rest = pres.filter(p=>!(p.pos||[]).includes(slot));
+    return `<option value="">—</option>`
+      + (fits.length?`<optgroup label="Plays ${slot}">${fits.map(o).join("")}</optgroup>`:"")
+      + (rest.length?`<optgroup label="Not assigned here">${rest.map(o).join("")}</optgroup>`:"")
+      + tail;
+  };
 
   const head = innings(g).map(i=>{
     const filled=Object.keys(assignedIn(g,i,card)).length;
@@ -1412,7 +1479,7 @@ function viewLineup(g){
       const val = raw || "";
       return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<select
         class="${!val?"empty":""} ${why?"dup":""}" title="${esc(why)}"
-        data-i="${i}" data-p="${p.k}">${opts(val)}</select></td>`;
+        data-i="${i}" data-p="${p.k}">${opts(val, p.k)}</select></td>`;
     }).join("");
     return `<tr><th class="poscell">${p.k}<small>${p.label}</small></th>${cells}</tr>`;
   }).join("");
@@ -1430,7 +1497,7 @@ function viewLineup(g){
       const val = raw || "";
       return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<select
         class="${!val?"empty":""} ${why?"dup":""}" title="${esc(why)}"
-        data-i="${i}" data-p="${bk}">${opts(val)}</select></td>`;
+        data-i="${i}" data-p="${bk}">${opts(val, bk)}</select></td>`;
     }).join("");
     return `<tr class="benchrow"><th class="poscell">${bk}<small>Bench</small></th>${cells}</tr>`;
   }).join("");
@@ -1546,6 +1613,16 @@ function viewLineup(g){
   </div>
 
   <div class="card noprint">
+    <button class="h hbtn" id="posRef">Who plays where
+      <span class="rule"></span>
+      <span class="caret">${posOpen?"\u2013":"+"}</span></button>
+    ${posOpen?`<div class="sub">Primary in bold. The dropdowns above put these kids first.</div>
+      <div class="pref">${posBySlotHTML()}</div>
+      <div class="hint">Set these on the <b>Who\'s In</b> tab. Pitcher is open to anyone
+        and doesn\'t count toward a kid\'s spots.</div>`:""}
+  </div>
+
+  <div class="card noprint">
     <div class="h">Game day <span class="rule"></span></div>
     <div class="sub">Full-screen batting order and field chart for the iPad.</div>
     <div class="row">
@@ -1612,7 +1689,15 @@ function viewSplit(){
       <span class="st">${name}</span>
       <select data-third="${t}">
         <option value="">\u2014</option>
-        ${pres.map(x=>`<option value="${x.id}" ${x.id===a[t]?"selected":""}>${esc(x.name)}</option>`).join("")}
+        ${(()=>{
+          const o = x => `<option value="${x.id}" ${x.id===a[t]?"selected":""}>${esc(x.name)}</option>`;
+          if(openSlot(p)) return pres.map(o).join("");
+          const slot = slotOf(p);
+          const fits = pres.filter(x=>(x.pos||[]).includes(slot));
+          const rest = pres.filter(x=>!(x.pos||[]).includes(slot));
+          return (fits.length?`<optgroup label="Plays ${slot}">${fits.map(o).join("")}</optgroup>`:"")
+               + (rest.length?`<optgroup label="Not assigned here">${rest.map(o).join("")}</optgroup>`:"");
+        })()}
       </select></div>`;
   return `<div class="ovl" id="ovl">
     <div class="sheetbox">
@@ -1627,6 +1712,39 @@ function viewSplit(){
       </div>
     </div>
   </div>`;
+}
+
+/* --- Position reference ---
+   One renderer, used collapsed on the Lineup tab and open on Who\'s In, so the
+   two can never show different assignments. */
+function posByPlayerHTML(editable){
+  return S.roster.map(p=>{
+    const ps = p.pos || [];
+    const chips = ASSIGN_SLOTS.map(k=>{
+      const at = ps.indexOf(k);
+      const cls = at===0 ? "pri" : at>0 ? "sec" : "off";
+      return editable
+        ? `<button class="pslot ${cls}" data-slot="${p.id}|${k}">${k}</button>`
+        : (at<0 ? "" : `<span class="pslot ${cls}">${k}</span>`);
+    }).join("");
+    return `<div class="prow2 ${ps.length?"":"none"}">
+      <span class="pn">${esc(p.name)}</span>
+      <span class="pslots">${chips || `<span class="pslot off">none set</span>`}</span>
+    </div>`;
+  }).join("");
+}
+function posBySlotHTML(){
+  return ASSIGN_SLOTS.map(k=>{
+    const who = playersFor(k);
+    const thin = who.length <= 2;
+    return `<div class="prow2">
+      <span class="pk ${thin?"thin":""}">${k}</span>
+      <span class="pnames">${who.length
+        ? who.map(x=>`<b class="${(x.pos||[])[0]===k?"pri":""}">${esc(x.name)}</b>`).join(" ")
+        : `<i>nobody assigned</i>`}</span>
+      <span class="pdeep ${thin?"thin":""}">${who.length}</span>
+    </div>`;
+  }).join("");
 }
 
 /* --- Who\'s In --- */
@@ -1646,6 +1764,17 @@ function viewWho(g){
     <div class="plist">${chips}</div>
     <div class="hint">Marking a player out clears them from every inning and drops them from the batting order.</div>
   </div>
+  <div class="card">
+    <div class="h">Who plays where <span class="rule"></span></div>
+    <div class="sub">Two or three spots each. Tap once to add, again to make it the
+      primary, again to remove.</div>
+    <div class="pref edit">${posByPlayerHTML(true)}</div>
+    <div class="hint">OF covers all three outfield spots. Pitcher is open to anyone and
+      doesn\'t count toward these.</div>
+    <div class="h" style="margin-top:14px">By position <span class="rule"></span></div>
+    <div class="pref">${posBySlotHTML()}</div>
+  </div>
+
   <div class="card">
     <div class="h">Roster <span class="rule"></span></div>
     <div class="row">
@@ -1739,6 +1868,7 @@ document.addEventListener("pointercancel", batDragEnd);
 const owedAvgBn = rows => rows.length ? rows.reduce((a,r)=>a+r.bnPerGame,0)/rows.length : 0;
 
 let openRow   = null;        // one expanded player at a time
+let posOpen   = false;       // the Lineup tab\'s position reference
 let trendView = "pos";       // "pos" = position matrix, "owed" = fairness list
 
 function viewTrends(g){
@@ -2247,6 +2377,24 @@ document.addEventListener("click",e=>{
     });
     commit(); writeRoster(); S.games.forEach(writeGame);
   }
+  else if(b.id==="posRef"){ posOpen = !posOpen; render(); }
+  else if(b.dataset.slot){
+    const [pidv,k] = b.dataset.slot.split("|");
+    const pl = S.roster.find(x=>x.id===pidv); if(!pl) return;
+    const ps = (pl.pos||[]).slice();
+    const at = ps.indexOf(k);
+    if(at < 0){
+      // three is the cap agreed for consistency; say so rather than silently ignoring
+      if(ps.length >= 3){ alert(pl.name+" already has three spots. Remove one first."); return; }
+      ps.push(k);
+    } else if(at > 0){
+      ps.splice(at,1); ps.unshift(k);              // promote to primary
+    } else {
+      ps.shift();                                   // tapping the primary clears it
+    }
+    pl.pos = ps;
+    commit(); writeRoster();
+  }
   else if(b.dataset.view){ trendView = b.dataset.view; render(); }
   else if(b.dataset.exp){ openRow = (openRow===b.dataset.exp) ? null : b.dataset.exp; render(); }
   else if(b.id==="incCur"){
@@ -2480,7 +2628,9 @@ async function connect(){
       sawTeam=true; teamExists=snap.exists();
       const d=snap.data();
       if(d && Array.isArray(d.coaches)) S.coaches = d.coaches;
-      if(d && Array.isArray(d.roster) && d.roster.length){ S.roster=d.roster; teamHasRoster=true; }
+      if(d && Array.isArray(d.roster) && d.roster.length){
+        S.roster=d.roster; teamHasRoster=true;
+      }
       else if(d && typeof d.state==="string"){
         // migration from the original single-document format
         try{
@@ -2530,6 +2680,7 @@ function arrive(){
     // "the team document is absent" — an older schema left the doc in place
     // with no games under it, and cell writes then had nothing to patch.
     if(!teamHasRoster){ note("no roster on the server — uploading it"); writeRoster(); }
+    else seedPositionsOnce();   // needs ready=true above, or the write is dropped
     if(serverGames===0 && S.games.length){
       note("no games on the server — uploading "+S.games.length);
       S.games.forEach(writeGame);
@@ -2556,6 +2707,23 @@ function writeCoaches(){
   if(!DB || !ready) return;
   track(FS.setDoc(teamRef,{coaches:S.coaches||[],at:Date.now()},{merge:true}),"names");
 }
+/* The roster already on the server predates position assignments. Fill them in
+   from the agreed list the first time, matching on name, and push the result
+   back. Only ever applied when NOBODY has assignments — once any exist, the
+   server is the source of truth and this never runs again. */
+function seedPositionsOnce(){
+  if(S.roster.some(p=>(p.pos||[]).length)) return;
+  let hits = 0;
+  S.roster.forEach(p=>{
+    const ps = SEED_POS[p.name];
+    if(ps){ p.pos = ps.slice(); hits++; }
+  });
+  if(!hits) return;
+  note("filled in position assignments for "+hits+" players");
+  saveLocal();
+  writeRoster();
+}
+
 function writeRoster(){
   if(!DB || !ready) return;
   track(FS.setDoc(teamRef,{schema:SCHEMA,roster:S.roster,at:Date.now()},{merge:true}),"roster");
