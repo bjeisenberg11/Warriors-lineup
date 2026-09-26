@@ -537,7 +537,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-25.0033";
+const BUILD  = "2026-09-25.2136";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -919,6 +919,53 @@ function seasonTotals(exceptId, mode, includeToday){
   });
   return rows;
 }
+/* Has today's card paid back what the season says a kid is owed?
+
+   The season figures deliberately exclude today so they hold still while the
+   card is built — recomputing them live would move the target as you aim at
+   it. So the numbers stay put and the line reports status instead:
+
+     bench   handled when today gives them the LIGHTER of the two bench loads.
+             With 12 players over 6 innings six kids sit twice and six sit once;
+             a kid who has been sitting too much should be in the once group.
+             When the load divides evenly there is nothing to distribute, so it
+             counts as handled either way.
+     infield handled when today's infield share is above their season share —
+             that is exactly what pulls the average back up.
+
+   Judged on the pregame card, like every other fairness question. */
+function owedStatus(g, card){
+  const owed  = seasonOwed(g.id);
+  const c     = card || planCard(g);
+  const t     = tallyGame(g, c);
+  const pres2 = present(g);
+  const n     = pres2.length;
+  const benchTotal = Math.max(0, n - FIELD_N) * scoredInnings(g);
+  const light = n ? Math.floor(benchTotal / n) : 0;
+  const heavy = n ? Math.ceil(benchTotal / n)  : 0;
+  const even  = light === heavy;
+  const EPS   = 1e-9;
+
+  const mark = (rows, kind) => rows.map(r=>{
+    const today = pres2.some(p=>p.id===r.id) ? t[r.id] : null;
+    if(!today) return Object.assign({}, r, {state:"out"});
+    if(kind === "bench")
+      return Object.assign({}, r, {
+        state: (even || today.BN <= light + EPS) ? "ok" : "owed", todayBN: today.BN });
+    const played = today.INF + today.OF;
+    const share  = played > 0 ? today.INF / played : 0;
+    return Object.assign({}, r, {
+      state: (played > 0 && share > r.infShare + EPS) ? "ok" : "owed", todayShare: share });
+  });
+
+  const bench = mark(owed.bench, "bench"), infield = mark(owed.infield, "infield");
+  const all = bench.concat(infield);
+  return { bench, infield,
+           anyOwed: all.some(r=>r.state==="owed"),
+           anyOk:   all.some(r=>r.state==="ok"),
+           count:   all.length };
+}
+
 /* Who is owed: most bench per game, and least infield share. */
 function seasonOwed(exceptId){
   const rows = seasonTotals(exceptId);      // today excluded, as above
@@ -1545,13 +1592,17 @@ function viewLineup(g){
       <span class="tag">${cardMode==="live"?"PREGAME":"GAME DAY"}</span>
       <span>${liveErrs} problem${liveErrs===1?"":"s"} on the ${
         cardMode==="live"?"pregame":"game-day"} card too. Tap to open it.</span></button>` : "";
-  const owed = seasonOwed(g.id);
-  const owedFlag = (owed.bench.length || owed.infield.length) ? `<div class="check info">
+  const owed = owedStatus(g, planCard(g));
+  const mk   = r => r.state==="ok" ? " \u2713" : r.state==="out" ? " (out today)" : "";
+  const owedFlag = owed.count ? `<div class="check ${owed.anyOwed?"info":"ok"}">
       <span class="tag">SEASON</span><span>${[
         owed.bench.length   ? `Most bench so far: ${owed.bench.slice(0,3).map(r=>
-            esc(r.name)+" ("+fmtInn(r.BN)+" over "+r.games+")").join(", ")}` : "",
+            esc(r.name)+" ("+fmtInn(r.BN)+" over "+r.games+")"+mk(r)).join(", ")}` : "",
         owed.infield.length ? `Least infield: ${owed.infield.slice(0,3).map(r=>
-            esc(r.name)+" ("+Math.round(r.infShare*100)+"%)").join(", ")}` : ""
+            esc(r.name)+" ("+Math.round(r.infShare*100)+"%)"+mk(r)).join(", ")}` : "",
+        owed.anyOwed
+          ? (owed.anyOk ? "\u2713 handled by today's card." : "")
+          : "All handled by today's card \u2014 the season figures update after the game."
       ].filter(Boolean).join(" \u00b7 ")}</span></div>` : "";
   const paint = c => `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`;
   const checks = noteFlag + liveFlag + owedFlag
