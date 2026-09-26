@@ -127,7 +127,7 @@ table.grid th,table.grid td{padding:0;border-bottom:1px solid var(--fog)}
 }
 .poscell small{display:block;font-family:var(--body);font-weight:500;font-size:9px;
   letter-spacing:.09em;color:var(--mute);text-transform:uppercase;margin-top:-3px}
-.inhead{padding:5px 4px 6px;text-align:center;background:var(--card);
+.inhead{position:relative;padding:5px 4px 6px;text-align:center;background:var(--card);
   border-bottom:1px solid var(--fog)}
 .inhead .n{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:.05em}
 .dots{display:flex;gap:2px;justify-content:center;margin-top:3px}
@@ -335,6 +335,16 @@ table.tally tr.flag td.l{color:var(--red-deep);font-weight:600}
 .bat .mv{border:1px solid var(--fog);border-radius:7px;width:36px;height:34px;
   font-size:15px;color:var(--steel);background:#fff}
 .bat .mv:disabled{opacity:.3}
+.inngrip{display:block;width:100%;padding:3px 0 1px;margin-top:2px;font-size:15px;
+  line-height:.7;color:var(--fog);letter-spacing:.14em;touch-action:none;cursor:grab}
+.inhead.done .inngrip{color:#E4BAC1}
+body.inndrag .inngrip{cursor:grabbing}
+body.inndrag td.cell select,body.inndrag td.cell button{pointer-events:none}
+[data-inncol].dragsrc{opacity:.45}
+th.inhead.dragsrc .n{color:var(--red)}
+[data-inncol].dragdst{background:var(--red-wash);box-shadow:inset 2px 0 0 var(--red)}
+th.inhead.dragdst{box-shadow:inset 2px 0 0 var(--red)}
+
 .bat .grip{flex:none;width:30px;text-align:center;font-size:19px;color:var(--mute);
   touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;
   align-self:stretch;display:flex;align-items:center;justify-content:center}
@@ -537,7 +547,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-25.2152";
+const BUILD  = "2026-09-26.1708";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -638,6 +648,20 @@ function moveInList(arr, id, toIdx){
   list.splice(from,1);
   list.splice(to,0,id);
   return list;
+}
+
+/* Move a whole inning to another position. seq is the new running order of the
+   old inning numbers, so seq[0] is whichever inning now bats first. Every slot
+   key is rewritten; nothing else in the card is touched. */
+function remapInnings(card, seq){
+  const out = {};
+  Object.keys(card||{}).forEach(k=>{
+    const m = /^i(\d+)_(.+)$/.exec(k);
+    if(!m){ out[k] = card[k]; return; }
+    const at = seq.indexOf(+m[1]);
+    out[at >= 0 ? "i"+(at+1)+"_"+m[2] : k] = card[k];
+  });
+  return out;
 }
 
 /* Two cards per game. `slots` is the pregame plan, kept as a record. `actual`
@@ -1344,6 +1368,27 @@ function copyPlanToLive(){
   note("game-day card reset to the pregame plan");
 }
 
+/* Reordering rewrites most of the card at once, so this writes the whole slots
+   object rather than per-cell. Like any edit, it lands on the card you are
+   looking at, and forks the game-day card from the plan on first touch. */
+function moveInning(from, to){
+  const g=game(); if(!g) return;
+  const seq = moveInList(innings(g), from, to-1);
+  if(!seq) return;
+  if(cardMode === "live"){
+    if(!hasActual(g)){
+      g.actual = Object.assign({}, g.slots);
+      note("game-day card started from the pregame plan");
+    }
+    g.actual = remapInnings(g.actual, seq);
+    commit(); writeGameField(g.id, "actual", g.actual);
+  }else{
+    g.slots = remapInnings(g.slots, seq);
+    commit(); writeGameField(g.id, "slots", g.slots);
+  }
+  note("moved inning "+from+" to slot "+to);
+}
+
 function collapseSlot(i,p){
   const g=game(); const k=key(i,p);
   const card = cardMode==="live" ? effCard(g) : planCard(g);
@@ -1469,7 +1514,7 @@ window.addEventListener("resize", measureChrome);
 window.addEventListener("orientationchange", ()=>setTimeout(measureChrome, 200));
 
 function render(){
-  if(batDrag) return;            // a redraw mid-drag would drop the row
+  if(batDrag || innDrag) return; // a redraw mid-drag would drop what is held
   if(displayMode){ renderDisplay(); renderPrint(); measureChrome(); return; }
   renderTabs();
   const g=game();
@@ -1524,9 +1569,12 @@ function viewLineup(g){
   const head = innings(g).map(i=>{
     const filled=Object.keys(assignedIn(g,i,card)).length;
     const done=filled===FIELD_N && !dupsIn(g,i,card).size;
-    return `<th class="inhead ${done?"done":""}"><div class="n">${i}</div>
+    return `<th class="inhead ${done?"done":""}" data-inncol="${i}" data-innhead="${i}">
+      <div class="n">${i}</div>
       <div class="dots">${Array.from({length:FIELD_N},(_,x)=>
-        `<span class="dot ${x<filled?"f":""}"></span>`).join("")}</div></th>`;
+        `<span class="dot ${x<filled?"f":""}"></span>`).join("")}</div>
+      <button class="inngrip" data-inngrip="${i}"
+        aria-label="Drag to move inning ${i}">\u22ef</button></th>`;
   }).join("");
 
   const rows = POS.map(p=>{
@@ -1534,12 +1582,12 @@ function viewLineup(g){
       const raw = card[key(i,p.k)];
       const why = cellConflict(g,i,p.k,card);
       if(isSplit(raw)){
-        return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<button
+        return `<td class="cell" data-inncol="${i}">${why?`<div class="why">${esc(why)}</div>`:""}<button
           class="splitcell ${why?"dup":""}" title="${esc(why)}"
           data-split="${i}_${p.k}">${esc(cellLabel(raw))||"\u2014"}</button></td>`;
       }
       const val = raw || "";
-      return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<select
+      return `<td class="cell" data-inncol="${i}">${why?`<div class="why">${esc(why)}</div>`:""}<select
         class="${!val?"empty":""} ${why?"dup":""}" title="${esc(why)}"
         data-i="${i}" data-p="${p.k}">${opts(val, p.k)}</select></td>`;
     }).join("");
@@ -1552,12 +1600,12 @@ function viewLineup(g){
       const raw = card[key(i,bk)];
       const why = cellConflict(g,i,bk,card);
       if(isSplit(raw)){
-        return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<button
+        return `<td class="cell" data-inncol="${i}">${why?`<div class="why">${esc(why)}</div>`:""}<button
           class="splitcell ${why?"dup":""}" title="${esc(why)}"
           data-split="${i}_${bk}">${esc(cellLabel(raw))||"—"}</button></td>`;
       }
       const val = raw || "";
-      return `<td class="cell">${why?`<div class="why">${esc(why)}</div>`:""}<select
+      return `<td class="cell" data-inncol="${i}">${why?`<div class="why">${esc(why)}</div>`:""}<select
         class="${!val?"empty":""} ${why?"dup":""}" title="${esc(why)}"
         data-i="${i}" data-p="${bk}">${opts(val, bk)}</select></td>`;
     }).join("");
@@ -1574,7 +1622,7 @@ function viewLineup(g){
     <th class="poscell">!<small>Unassigned</small></th>${
     innings(g).map(i=>{
       const un = unplacedIn(g,i,card);
-      return `<td class="unnames ${un.length?"":"done"}">${un.length
+      return `<td class="unnames ${un.length?"":"done"}" data-inncol="${i}">${un.length
         ? un.map(x=>esc(x.name)+(x.t<3?" "+fmtInn(x.t/3):"")).join("<br>")
         : "\u2713"}</td>`;
     }).join("")}</tr>` : "";
@@ -1583,7 +1631,7 @@ function viewLineup(g){
   const legacyRow = legacy ? `<tr class="benchrow"><th class="poscell">BN<small>Derived</small></th>${
     innings(g).map(i=>{
       const b = benchIn(g,i,card);
-      return `<td class="benchnames ${b.length?"":"none"}" title="Derived, not counted">${b.length
+      return `<td class="benchnames ${b.length?"":"none"}" title="Derived, not counted" data-inncol="${i}">${b.length
         ? b.map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join("<br>") : ""}</td>`;
     }).join("")}</tr>` : "";
   const bench = benchRows + unRow + legacyRow;
@@ -1643,6 +1691,8 @@ function viewLineup(g){
         hasActual(g) ? "\u21ba Reset to pregame lineup" : "\u21ba Start from pregame lineup"
       }</button>`:""}
     </div>
+    <div class="hint" style="margin:-2px 0 8px">Drag the \u22ef under an inning number
+      to move that whole inning.</div>
     <div class="sub">${bkeys.length?`Bench is ${bkeys.length} spot${bkeys.length===1?"":"s"} an inning — set them like any position. `:""}${cardMode==="live"
       ? (hasActual(g)
           ? `Changes here don't touch the pregame plan. Stats and trends use this card.`
@@ -1872,6 +1922,72 @@ function viewBat(g){
     <div id="batlist">${rows||`<div class="empty">Nobody marked in yet.</div>`}</div>
   </div>`;
 }
+
+/* --- Inning drag ---
+   Columns are not moved in the DOM while dragging: a table column lives across
+   every row, so shifting it mid-drag means touching a hundred cells. Instead
+   the source column dims, the drop position highlights, and the data is
+   rewritten once on release. Auto-scrolls when the grid is wider than the
+   screen so an inning can reach the far end. */
+let innDrag = null;
+
+function paintInnDrag(){
+  const d = innDrag;
+  document.querySelectorAll("[data-inncol]").forEach(el=>{
+    const i = +el.dataset.inncol;
+    el.classList.toggle("dragsrc", !!d && i === d.from);
+    el.classList.toggle("dragdst", !!d && i === d.to && d.to !== d.from);
+  });
+}
+
+function innDragStart(e){
+  const grip = e.target.closest("[data-inngrip]");
+  if(!grip) return;
+  e.preventDefault();
+  innDrag = { from:+grip.dataset.inngrip, to:+grip.dataset.inngrip };
+  document.body.classList.add("inndrag");
+  try{ grip.setPointerCapture(e.pointerId); }catch(err){}
+  paintInnDrag();
+}
+
+function innDragMove(e){
+  const d = innDrag; if(!d) return;
+  e.preventDefault();
+  const heads = [...document.querySelectorAll("[data-innhead]")];
+  if(!heads.length) return;
+
+  // keep the grid moving when the finger reaches an edge
+  const box = heads[0].closest(".gridscroll");
+  if(box){
+    const r = box.getBoundingClientRect();
+    if(e.clientX < r.left + 36)      box.scrollLeft -= 12;
+    else if(e.clientX > r.right - 36) box.scrollLeft += 12;
+  }
+
+  let to = d.to;
+  for(const h of heads){
+    const r = h.getBoundingClientRect();
+    if(e.clientX >= r.left && e.clientX <= r.right){ to = +h.dataset.innhead; break; }
+    if(e.clientX < r.left){ to = +h.dataset.innhead; break; }   // past the left edge
+  }
+  if(to !== d.to){
+    d.to = to; paintInnDrag();
+    if(navigator.vibrate) navigator.vibrate(8);
+  }
+}
+
+function innDragEnd(){
+  const d = innDrag; if(!d) return;
+  innDrag = null;
+  document.body.classList.remove("inndrag");
+  if(d.from !== d.to) moveInning(d.from, d.to);
+  else { paintInnDrag(); }
+}
+
+document.addEventListener("pointerdown", innDragStart);
+document.addEventListener("pointermove", innDragMove, {passive:false});
+document.addEventListener("pointerup", innDragEnd);
+document.addEventListener("pointercancel", innDragEnd);
 
 /* --- Batting order drag ----------------------------------------------
    Pointer events rather than HTML5 drag-and-drop, which does not fire on iOS.
