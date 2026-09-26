@@ -537,7 +537,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-25.2136";
+const BUILD  = "2026-09-25.2152";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -860,6 +860,13 @@ function tallyGame(g, card){
 }
 
 /* Counts across a set of games */
+/* Does this card record anything at all? A game with nothing in it contributes
+   to nobody's totals, so the list of games says so rather than implying it counted. */
+function hasInnings(g, card){
+  const c = card || effCard(g);
+  return allKeys(g).some(k=>scoredList(g).some(i=>thirdsOf(c[key(i,k)]).some(Boolean)));
+}
+
 function tallyMany(list, mode){
   const t={};
   S.roster.forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{},tpos:{},tINF:0,tOF:0,tBN:0,games:0}; });
@@ -867,6 +874,14 @@ function tallyMany(list, mode){
     const one=tallyGame(g, mode==="plan" ? planCard(g) : effCard(g));
     for(const id in one){
       if(!t[id]) continue;
+      /* A game only counts for a kid who actually has innings in it. Being on
+         the roster is not the same as having played: a card created for an
+         upcoming game, or one never filled in, would otherwise count as a
+         game played by everyone with zero innings — which quietly divides
+         every bench-per-game figure by a larger number. Absence is already
+         handled upstream, since tallyGame only builds rows for present(). */
+      const r = one[id];
+      if(!((r.tINF||0) + (r.tOF||0) + (r.tBN||0))) continue;
       t[id].games++;
       t[id].INF+=one[id].INF; t[id].OF+=one[id].OF; t[id].BN+=one[id].BN;
       t[id].tINF=(t[id].tINF||0)+(one[id].tINF||0);
@@ -2003,6 +2018,8 @@ function viewTrends(g){
       `<div style="font-size:14px;padding:6px 0;border-bottom:1px solid #EEF0F2">
       <b>${fmtDate(x.date)}</b> ${x.opp?esc(vsLabel(x)):"<span style='color:var(--mute)'>no opponent</span>"}
       ${endedEarly(x)?` <span style='color:var(--steel);font-size:12px'>\u00b7 ${scoredInnings(x)} of ${x.innings} innings</span>`:""}
+      ${hasInnings(x, trendMode==="plan"?planCard(x):effCard(x))?"":
+        " <span style='color:var(--amber);font-size:12px'>\u00b7 no lineup set, counts for nobody</span>"}
       ${x.id===g.id?" <span style='color:var(--red);font-size:12px'>\u00b7 today</span>":""}</div>`).join("")}
   </div>`;
 }
