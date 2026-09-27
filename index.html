@@ -547,7 +547,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-26.1708";
+const BUILD  = "2026-09-26.2158";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -648,6 +648,28 @@ function moveInList(arr, id, toIdx){
   list.splice(from,1);
   list.splice(to,0,id);
   return list;
+}
+
+/* Copying a batting order forward from an earlier game. The old order is a
+   preference, not a roster: anyone no longer on the roster or marked out of
+   this game drops out, and anyone in this game the old order never had is
+   appended so the list still covers everybody who bats. */
+function mergeOrder(srcOrder, liveIds, tailIds){
+  const live = new Set(liveIds || []);
+  const seen = new Set();
+  const out = [];
+  const take = id => { if(live.has(id) && !seen.has(id)){ seen.add(id); out.push(id); } };
+  (srcOrder || []).forEach(take);
+  (tailIds  || []).forEach(take);
+  return out;
+}
+/* Games a batting order can be copied from: anything else still in the season
+   that actually has one, most recent first. */
+function orderSources(games, curId){
+  return (games || [])
+    .filter(x => x.id !== curId && !x.arch && (x.order || []).length)
+    .slice()
+    .sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.created||0)-(a.created||0));
 }
 
 /* Move a whole inning to another position. seq is the new running order of the
@@ -1904,6 +1926,7 @@ function viewWho(g){
 
 /* --- Batting --- */
 function viewBat(g){
+  const src = orderSources(S.games, g.id);
   const order=(g.order||[]).filter(id=>!(g.out||[]).includes(id) && byId(id));
   present(g).forEach(p=>{ if(!order.includes(p.id)) order.push(p.id); });
   g.order=order;
@@ -1920,6 +1943,14 @@ function viewBat(g){
       <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${order.length} HITTERS</span></div>
     <div class="sub">Everyone who's in bats, bench or not. Drag by the grip, or use the arrows.</div>
     <div id="batlist">${rows||`<div class="empty">Nobody marked in yet.</div>`}</div>
+    ${src.length?`<div class="row" style="margin-top:11px;align-items:flex-end">
+      <div style="flex:1 1 60%"><label class="f">Copy order from</label>
+        <select class="t" id="copyOrderFrom">${src.map(x=>
+          `<option value="${x.id}">${fmtDate(x.date)}${x.opp?" "+esc(vsLabel(x)):""} \u2014 ${(x.order||[]).length} hitters</option>`).join("")}</select></div>
+      <button class="btn" id="copyOrder" style="flex:0 0 auto">Copy order</button>
+    </div>
+    <div class="hint">Replaces today's order. Anyone marked out today is left off, and
+      anyone in today that game didn't have is added at the bottom.</div>`:""}
   </div>`;
 }
 
@@ -2681,6 +2712,18 @@ document.addEventListener("click",e=>{
   else if(b.id==="pushAll"){
     if(!ready){ alert("Not connected to the database yet."); return; }
     writeRoster(); S.games.forEach(writeGame); note("manual re-send");
+  }
+  else if(b.id==="copyOrder"){
+    const g=game(); if(!g) return;
+    const sel=document.getElementById("copyOrderFrom");
+    const from=S.games.find(x=>x.id===(sel&&sel.value));
+    if(!from){ alert("Pick a game to copy from."); return; }
+    const live=present(g).map(p=>p.id);
+    const next=mergeOrder(from.order, live, live);
+    if(!next.length){ alert("Nobody is marked in today."); return; }
+    setOrder(next);
+    render();
+    note("order copied from "+(from.date||from.id));
   }
   else if(b.id==="dupGame") newGame(game());
   else if(b.id==="delGame"){
