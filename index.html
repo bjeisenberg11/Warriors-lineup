@@ -547,7 +547,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-26.2158";
+const BUILD  = "2026-09-26.2240";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1535,16 +1535,47 @@ function measureChrome(){
 window.addEventListener("resize", measureChrome);
 window.addEventListener("orientationchange", ()=>setTimeout(measureChrome, 200));
 
+/* --- Holding your place across a redraw ---------------------------------
+   Every pick runs through commit() -> render(), and render() replaces the
+   whole view. A fresh element starts at scrollLeft 0, so the grid snapped back
+   to the first inning after each entry and the page jumped to the top: you
+   were re-finding inning 5 twelve times to fill it in. The scroll positions
+   are read off the old DOM and written back onto the new one.
+
+   Only within the same tab. Moving to another tab should land at its top,
+   which is why drawnTab is compared rather than always restoring. */
+let drawnTab = null;
+
+function scrollSnap(){
+  return {
+    tab: drawnTab,
+    boxes: [...document.querySelectorAll(".gridscroll")].map(b=>b.scrollLeft),
+    y: window.scrollY || document.documentElement.scrollTop || 0
+  };
+}
+function scrollRestore(s){
+  if(!s || s.tab !== tab) return;                 // a new tab starts at the top
+  const boxes=[...document.querySelectorAll(".gridscroll")];
+  boxes.forEach((b,i)=>{ const x=s.boxes[i]; if(x) b.scrollLeft=x; });
+  if(s.y) window.scrollTo(0, s.y);
+}
+
 function render(){
   if(batDrag || innDrag) return; // a redraw mid-drag would drop what is held
   if(displayMode){ renderDisplay(); renderPrint(); measureChrome(); return; }
+  const keep = scrollSnap();
   renderTabs();
   const g=game();
   const v=document.getElementById("view");
-  if(!g){ v.innerHTML=`<div class="card"><div class="empty">No game yet. Tap <b>+ Game</b> to start a card.</div></div>`; return; }
+  if(!g){ v.innerHTML=`<div class="card"><div class="empty">No game yet. Tap <b>+ Game</b> to start a card.</div></div>`; drawnTab=tab; return; }
   v.innerHTML = ({
     lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, notes:viewNotes, game:viewGame
   }[tab])(g) + (tab==="lineup" ? viewSplit() : "");
+  drawnTab = tab;
+  scrollRestore(keep);
+  // iOS settles layout a frame later, and a mid-flight momentum scroll can
+  // overwrite the first write, so the position is put back once more.
+  requestAnimationFrame(()=>scrollRestore(keep));
   renderPrint();
   const st=document.getElementById("stamp");
   if(st) st.textContent="BUILD "+BUILD+"  ·  SCHEMA "+SCHEMA;
