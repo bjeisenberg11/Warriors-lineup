@@ -553,8 +553,15 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "921716476359",
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
+/* The browser puts the page back where it was on a reload, and it does it
+   AFTER the app has drawn \u2014 so opening a tab at the top was being undone a
+   moment later, and the Game tab kept reappearing scrolled past its own Date
+   and Opponent fields. This app decides where each tab starts, so the
+   browser's restoration is turned off rather than fought. */
+try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
+
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-04.2239";
+const BUILD  = "2026-10-04.2248";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
