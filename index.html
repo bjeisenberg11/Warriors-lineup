@@ -322,6 +322,11 @@ table.tally tr.flag td.l{color:var(--red-deep);font-weight:600}
 .pchip.out{background:#F7F8F9;border-style:dashed}
 .pchip.out .nm{color:var(--mute);text-decoration:line-through}
 .pchip.out .st{background:var(--fog);color:var(--steel)}
+/* Call-up marker. Deliberately plain rather than red: it is a label, not a
+   warning, and it has to stay legible everywhere a name appears. */
+.cutag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;
+  vertical-align:1px;padding:1px 4px;border-radius:4px;background:var(--fog);color:var(--steel)}
+.dbatrow .cutag{font-size:1.3vh;padding:.1vh .6vh;background:#565D66;color:#D7DCE2;vertical-align:.4vh}
 .countline{font-family:var(--mono);font-size:12px;color:var(--steel);margin-bottom:9px}
 
 /* ---------- Batting ---------- */
@@ -441,6 +446,8 @@ body.display-on #display{display:block}
   display:flex;flex-direction:column;min-height:0}
 .dbat h3,.dgrid h3{font-family:var(--disp);font-weight:600;font-size:1.9vh;letter-spacing:.12em;
   text-transform:uppercase;color:#9AA2AB;margin:.2vh 0 .8vh;flex:none}
+.dwin{float:right;font-family:var(--mono);font-size:1.6vh;letter-spacing:.06em;
+  color:#C9CFD6;background:#3A3F47;padding:.1vh .9vh;border-radius:.4vh;text-transform:none}
 .dbatlist{flex:1;display:flex;flex-direction:column;gap:.35vh;min-height:0}
 .dbatrow{display:flex;align-items:center;gap:.9vh;flex:1;min-height:0;
   background:#33373E;border-radius:.8vh;padding:0 1vh}
@@ -547,7 +554,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-09-26.2240";
+const BUILD  = "2026-10-04.2135";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -615,7 +622,20 @@ let notesSeen = 0;
 const byId = id => S.roster.find(p=>p.id===id);
 const nameOf = id => (byId(id)||{}).name || "?";
 const game = () => S.games.find(g=>g.id===S.cur) || null;
-const present = g => S.roster.filter(p=>!(g.out||[]).includes(p.id));
+/* ---- Call-ups ---------------------------------------------------------
+   A guest for one game \u2014 a kid pulled up to cover absences. They sit on the
+   roster only so the card can place them, carrying the id of the single game
+   they belong to. Everything that measures the season (trends, totals,
+   fairness, who-plays-where) counts the regular roster only, so a call-up
+   never dilutes a teammate\'s share, never shows up in a trend, and is never
+   expected to have a position assignment they were never given. */
+const isCallup  = p => !!(p && p.cu);
+const regulars  = () => S.roster.filter(p => !p.cu);
+const callupsIn = g => S.roster.filter(p => p.cu && g && p.cu === g.id);
+/* The roster as it applies to one game: regulars plus that game\'s call-ups. */
+const rosterFor = g => S.roster.filter(p => !p.cu || (g && p.cu === g.id));
+
+const present = g => rosterFor(g).filter(p=>!(g.out||[]).includes(p.id));
 const key = (i,p) => "i"+i+"_"+p;
 
 /* ---- Position assignments -------------------------------------------------
@@ -629,12 +649,15 @@ const slotOf = k => OF_KEYS.includes(k) ? "OF" : k;      // grid key -> assignme
 const posOfPlayer = id => (byId(id)||{}).pos || [];
 /* P and the bench are open to anyone; everything else goes by the list. */
 const openSlot = k => k === "P" || isBenchKey(k);
-const eligible = (id, k) => openSlot(k) || posOfPlayer(id).includes(slotOf(k));
+/* A call-up has no assignment scheme, so every spot is open to them rather
+   than none \u2014 the alternative greys out the whole grid for the one player
+   you added precisely because you were short. */
+const eligible = (id, k) => openSlot(k) || isCallup(byId(id)) || posOfPlayer(id).includes(slotOf(k));
 const isPrimary = (id, k) => !openSlot(k) && posOfPlayer(id)[0] === slotOf(k);
 /* Everyone listed for a slot, primaries first, in roster order. */
 function playersFor(slot){
-  const pri = S.roster.filter(p=>(p.pos||[])[0]===slot);
-  const sec = S.roster.filter(p=>(p.pos||[]).includes(slot) && (p.pos||[])[0]!==slot);
+  const pri = regulars().filter(p=>(p.pos||[])[0]===slot);
+  const sec = regulars().filter(p=>(p.pos||[]).includes(slot) && (p.pos||[])[0]!==slot);
   return pri.concat(sec);
 }
 /* Move one id to a new index. Returns null for a no-op so callers can skip the
@@ -670,6 +693,22 @@ function orderSources(games, curId){
     .filter(x => x.id !== curId && !x.arch && (x.order || []).length)
     .slice()
     .sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.created||0)-(a.created||0));
+}
+
+/* The tablet shows a window of innings rather than all six. Six columns on a
+   fence at twenty feet is unreadable; three is legible across the dugout. The
+   window always contains the live inning and puts it on the left so the next
+   innings are the ones you see coming, sliding back only at the end of the
+   game when there is nothing left to the right. */
+const DISPLAY_INN = 3;
+function inningWindow(list, inn, size){
+  const all = (list || []).slice();
+  const n = size || DISPLAY_INN;
+  if(all.length <= n) return all;
+  let start = all.indexOf(inn);
+  if(start < 0) start = 0;
+  start = Math.max(0, Math.min(start, all.length - n));
+  return all.slice(start, start + n);
 }
 
 /* Move a whole inning to another position. seq is the new running order of the
@@ -915,7 +954,10 @@ function hasInnings(g, card){
 
 function tallyMany(list, mode){
   const t={};
-  S.roster.forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{},tpos:{},tINF:0,tOF:0,tBN:0,games:0}; });
+  /* Seeded from the regular roster only. tallyGame still builds rows for a
+     call-up who played, but with no bucket here the `if(!t[id]) continue`
+     below drops them, so a one-game guest never enters a season figure. */
+  regulars().forEach(p=>{ t[p.id]={INF:0,OF:0,BN:0,pos:{},tpos:{},tINF:0,tOF:0,tBN:0,games:0}; });
   list.forEach(g=>{
     const one=tallyGame(g, mode==="plan" ? planCard(g) : effCard(g));
     for(const id in one){
@@ -969,7 +1011,7 @@ function seasonTotals(exceptId, mode, includeToday){
   const list = seasonGames(exceptId, includeToday);
   const t = tallyMany(list, mode || "live");
   const rows = [];
-  S.roster.forEach(p=>{
+  regulars().forEach(p=>{
     const r = t[p.id];
     if(!r || !r.games) return;
     const played = r.INF + r.OF;
@@ -1206,7 +1248,7 @@ function resolveName(raw, index){
 
 function parseLineup(text, innCount){
   const index = {map:{}, list:[]};
-  S.roster.forEach(p=>{
+  regulars().forEach(p=>{
     const n = normName(p.name);
     index.map[n] = p.id;
     index.list.push({id:p.id, norm:n, name:p.name});
@@ -1283,7 +1325,7 @@ function parseLineup(text, innCount){
   });
 
   const appeared = new Set([...Object.values(slots), ...benched]);
-  const out = S.roster.filter(p=>!appeared.has(p.id)).map(p=>p.id);
+  const out = regulars().filter(p=>!appeared.has(p.id)).map(p=>p.id);
   order = order.filter(id=>!out.includes(id));
 
   return {
@@ -1887,7 +1929,7 @@ function viewSplit(){
    One renderer, used collapsed on the Lineup tab and open on Who\'s In, so the
    two can never show different assignments. */
 function posByPlayerHTML(editable){
-  return S.roster.map(p=>{
+  return regulars().map(p=>{
     const ps = p.pos || [];
     const chips = ASSIGN_SLOTS.map(k=>{
       const at = ps.indexOf(k);
@@ -1919,19 +1961,36 @@ function posBySlotHTML(){
 /* --- Who\'s In --- */
 function viewWho(g){
   const out=g.out||[];
-  const chips = S.roster.map(p=>{
+  const mine = rosterFor(g);
+  const cu = callupsIn(g);
+  const chips = mine.map(p=>{
     const isOut=out.includes(p.id);
     return `<button class="pchip ${isOut?"out":"in"}" data-toggle="${p.id}">
-      <span class="nm">${esc(p.name)}</span>
+      <span class="nm">${esc(p.name)}${isCallup(p)?` <b class="cutag">CU</b>`:""}</span>
       <span class="st">${isOut?"OUT":"IN"}</span></button>`;
   }).join("");
-  const n=S.roster.length-out.length;
+  const n=mine.length-out.length;
   return `
   <div class="card">
     <div class="h">Who's in <span class="rule"></span></div>
     <div class="countline">${n} playing · ${out.length} out · ${Math.max(0,n-FIELD_N)} on the bench each inning</div>
     <div class="plist">${chips}</div>
     <div class="hint">Marking a player out clears them from every inning and drops them from the batting order.</div>
+  </div>
+
+  <div class="card">
+    <div class="h">Call-ups <span class="rule"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">THIS GAME ONLY</span></div>
+    <div class="sub">A guest filling in for this game. They can be placed anywhere on the
+      card and they bat, but they stay out of trends, season totals and the fairness
+      checks \u2014 so a call-up never changes what your own kids are owed.</div>
+    <div class="row">
+      <input class="t" id="newCallup" placeholder="Add a call-up for ${esc(fmtDate(g.date))}">
+      <button class="btn" id="addCallup" style="flex:0 0 auto">Add</button>
+    </div>
+    ${cu.length?`<div class="hint">On for this game only. ${cu.map(p=>
+      `<button class="btn ghost" data-remove="${p.id}" style="padding:4px 8px;font-size:12px;margin:4px 4px 0 0">\u2715 ${esc(p.name)}</button>`).join("")}</div>`
+    : `<div class="hint">None for this game.</div>`}
   </div>
   <div class="card">
     <div class="h">Who plays where <span class="rule"></span></div>
@@ -1950,7 +2009,7 @@ function viewWho(g){
       <input class="t" id="newName" placeholder="Add a player">
       <button class="btn" id="addPlayer" style="flex:0 0 auto">Add</button>
     </div>
-    <div class="hint" id="rmHint">Removing a player takes them off past games too. ${S.roster.map(p=>
+    <div class="hint" id="rmHint">Removing a player takes them off past games too. ${regulars().map(p=>
       `<button class="btn ghost" data-remove="${p.id}" style="padding:4px 8px;font-size:12px;margin:4px 4px 0 0">✕ ${esc(p.name)}</button>`).join("")}</div>
   </div>`;
 }
@@ -1964,7 +2023,7 @@ function viewBat(g){
   const rows=order.map((id,i)=>`
     <div class="bat" data-bat="${id}">
       <div class="num"><i>${i+1}</i></div>
-      <div class="nm">${esc(nameOf(id))}</div>
+      <div class="nm">${esc(nameOf(id))}${isCallup(byId(id))?` <b class="cutag">CU</b>`:""}</div>
       <button class="mv" data-up="${id}" ${i===0?"disabled":""}>▲</button>
       <button class="mv" data-down="${id}" ${i===order.length-1?"disabled":""}>▼</button>
       <span class="grip" data-grip="${id}" aria-hidden="true">⠿</span>
@@ -2424,21 +2483,23 @@ function renderDisplay(){
     const label = pos || (benchNow.has(id) ? "BN" : "—");
     return `<div class="dbatrow">
       <span class="n">${i+1}</span>
-      <span class="nm">${esc(nameOf(id))}</span>
+      <span class="nm">${esc(nameOf(id))}${isCallup(byId(id))?` <b class="cutag">CU</b>`:""}</span>
       <span class="pz ${pos?"":"bn"}">${label}</span>
     </div>`;
   }).join("");
 
-  const head = innings(g).map(i=>
+  const all = innings(g);
+  const win = inningWindow(all, inn, DISPLAY_INN);
+  const head = win.map(i=>
     `<th class="${i===inn?"live":""}">${i}</th>`).join("");
   const rows = POS.map(p=>`<tr><td class="pos">${p.k}</td>${
-    innings(g).map(i=>{
+    win.map(i=>{
       const v = card[key(i,p.k)];
       return `<td class="${i===inn?"live":""}">${esc(cellLabel(v))}</td>`;
     }).join("")}</tr>`).join("");
   const bench = `<tr class="bn"><td class="pos">BN</td>${
-    innings(g).map(i=>`<td class="${i===inn?"live":""}">${
-      benchIn(g,i,card).map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join(" / ")||"—"}</td>`).join("")}</tr>`;
+    win.map(i=>`<td class="${i===inn?"live":""}">${
+      benchIn(g,i,card).map(x=>esc(x.name)+(x.t<3?THIRD[x.t]:"")).join(" / ")||"\u2014"}</td>`).join("")}</tr>`;
 
   host.innerHTML = `
   <div class="dwrap">
@@ -2462,7 +2523,9 @@ function renderDisplay(){
         <div class="dbatlist">${bats || `<div class="dbatrow"><span class="nm">Nobody marked in</span></div>`}</div>
       </div>
       <div class="dgrid">
-        <h3>Field</h3>
+        <h3>Field <span class="dwin">${win.length<all.length
+          ? `Innings ${win[0]}\u2013${win[win.length-1]} of ${all.length}`
+          : `All ${all.length} innings`}</span></h3>
         <table class="dtab">
           <thead><tr><th class="pos">POS</th>${head}</tr></thead>
           <tbody>${rows}${bench}</tbody>
@@ -2612,6 +2675,18 @@ document.addEventListener("click",e=>{
     S.roster.push({id,name:nm}); el.value="";
     commit(); writeRoster();
   }
+  else if(b.id==="addCallup"){
+    const g=game(); if(!g){ alert("Start a game first."); return; }
+    const el=document.getElementById("newCallup"), nm=(el.value||"").trim();
+    if(!nm) return;
+    // Scoped id: the same guest name in two games is two separate entries, so
+    // removing one game's call-up can never disturb another game's card.
+    const id="cu_"+g.id+"_"+pid(nm);
+    if(S.roster.some(p=>p.id===id)){ alert(nm+" is already a call-up for this game."); return; }
+    S.roster.push({id,name:nm,cu:g.id});
+    el.value="";
+    commit(); writeRoster();
+  }
   else if(b.dataset.remove){
     const id=b.dataset.remove;
     if(!confirm("Remove "+nameOf(id)+" from the roster?")) return;
@@ -2726,7 +2801,7 @@ document.addEventListener("click",e=>{
       if(S.games.some(g=>g.id===id) && !confirm("A game on "+fmtDate(when)+" already exists. Replace it?")) return;
       S.games=S.games.filter(g=>g.id!==id);
       const g={id,date:when,opp:"",innings:innCount,bslots:1,out:r.out,
-        order:r.order.length?r.order:S.roster.filter(p=>!r.out.includes(p.id)).map(p=>p.id),
+        order:r.order.length?r.order:regulars().filter(p=>!r.out.includes(p.id)).map(p=>p.id),
         slots:r.slots,created:Date.parse(when)};
       S.games.push(g); reorderGames(); S.cur=id; tab="lineup";
       saveCur(); commit(); writeGame(g); refreshPicker();
@@ -2775,9 +2850,16 @@ document.addEventListener("click",e=>{
                 "This cannot be undone and the lineup cannot be recovered. "+
                 "Download the season CSV first if you might want it.")) return;
     S.games=S.games.filter(x=>x.id!==gg.id);
+    // The game's call-ups existed only for it, so they go with it rather than
+    // lingering on the roster as guests of a game that no longer exists.
+    const guests = callupsIn(gg);
+    if(guests.length){
+      S.roster = S.roster.filter(p=>p.cu !== gg.id);
+      writeRoster();
+    }
     if(S.cur===gg.id) S.cur=(liveGames()[liveGames().length-1]||{}).id||null;
     commit(); removeGame(gg.id); refreshPicker();
-    note("deleted game "+gg.id);
+    note("deleted game "+gg.id+(guests.length?" and "+guests.length+" call-up(s)":""));
   }
   else if(b.dataset.restore){
     const gg=S.games.find(x=>x.id===b.dataset.restore);
@@ -2794,7 +2876,7 @@ function newGame(from){
   const today=new Date().toISOString().slice(0,10);
   const g={ id, date:today, opp:"", innings:from?from.innings:6, bslots:1,
     out:from?[...(from.out||[])]:[],
-    order:from?[...(from.order||[])]:S.roster.map(p=>p.id),
+    order:from?[...(from.order||[])]:regulars().map(p=>p.id),
     slots:{}, done:false, created:Date.now() };
   S.games.push(g); S.cur=id; tab="lineup";
   saveCur(); commit(); writeGame(g); refreshPicker();
@@ -2816,7 +2898,8 @@ function seasonCsv(){
         const r=t[p.id]; if(!r) return;
         const pos = Object.keys(r.pos).sort().map(k=>k+" "+fmtInn(r.pos[k])).join(" ");
         rows.push([g.date||"", g.opp||"", g.ha||"", scoredInnings(g), label,
-                   p.name, fmtInn(r.INF), fmtInn(r.OF), fmtInn(r.BN), pos].map(q).join(","));
+                   p.name + (isCallup(p) ? " (call-up)" : ""),
+                   fmtInn(r.INF), fmtInn(r.OF), fmtInn(r.BN), pos].map(q).join(","));
       });
     });
   });
@@ -2970,9 +3053,9 @@ function writeCoaches(){
    back. Only ever applied when NOBODY has assignments — once any exist, the
    server is the source of truth and this never runs again. */
 function seedPositionsOnce(){
-  if(S.roster.some(p=>(p.pos||[]).length)) return;
+  if(regulars().some(p=>(p.pos||[]).length)) return;
   let hits = 0;
-  S.roster.forEach(p=>{
+  regulars().forEach(p=>{
     const ps = SEED_POS[p.name];
     if(ps){ p.pos = ps.slice(); hits++; }
   });
