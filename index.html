@@ -561,7 +561,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-04.2248";
+const BUILD  = "2026-10-04.2304";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1703,6 +1703,21 @@ window.addEventListener("orientationchange", ()=>setTimeout(measureChrome, 200))
    downward scrolling left to do, so nothing legitimate is blocked. Anything
    with its own scrollbar (the inning grid, a textarea) is left alone, or
    swiping those near the top of the page would stick. */
+/* Hold the top for a few frames after a tab change. Cancelled by a touch,
+   so it only ever wins against the browser, never against the user. */
+let topHold = [];
+function toTop(){
+  dropTopHold();
+  window.scrollTo(0, 0);
+  const again = () => { if(!topHold.length) return; window.scrollTo(0, 0); };
+  topHold.push(requestAnimationFrame(()=>{ again(); topHold.push(setTimeout(again, 60)); }));
+  topHold.push(setTimeout(()=>{ again(); dropTopHold(); }, 220));
+}
+function dropTopHold(){
+  topHold.forEach(h=>{ clearTimeout(h); cancelAnimationFrame(h); });
+  topHold = [];
+}
+
 let ptrY = 0;
 const scrollableUnder = el => {
   for(let n = el; n && n !== document.body; n = n.parentElement){
@@ -1714,6 +1729,7 @@ const scrollableUnder = el => {
 };
 document.addEventListener("touchstart", e=>{
   ptrY = e.touches && e.touches[0] ? e.touches[0].clientY : 0;
+  dropTopHold();                                       // the user wins, always
 }, {passive:true});
 document.addEventListener("touchmove", e=>{
   if(!e.cancelable || !e.touches || !e.touches[0]) return;
@@ -1761,12 +1777,14 @@ function scrollRestore(s, page){
   if(s.tab !== tab){
     /* A new tab must START at the top. Skipping the restore was not enough:
        the browser keeps the document scroll across an innerHTML swap, so
-       switching from a long tab to a short one left you partway down it. On
-       the Game tab that put the Date and Opponent fields off-screen above,
-       and the only way back was a swipe the browser took for pull-to-refresh.
-       Nothing is restored here, so this is the one place the page is moved
-       deliberately. */
-    if(page) window.scrollTo(0, 0);
+       switching from a long tab to a short one left you partway down it.
+       One scrollTo was not enough either: something lands after it \u2014 the
+       browser\'s own restoration, or the toolbar resizing the viewport \u2014 and
+       left every tab sitting about ninety pixels down, with the Game tab\'s
+       Date and Opponent fields hidden above the fold. So the top is asserted
+       again over the next moment, and abandoned the instant a finger lands
+       so it can never fight a real scroll. */
+    if(page) toTop();
     return;
   }
   const boxes=[...document.querySelectorAll(".gridscroll")];
@@ -1775,6 +1793,17 @@ function scrollRestore(s, page){
   const now = window.scrollY || document.documentElement.scrollTop || 0;
   if(now < s.y - 4) window.scrollTo(0, s.y);      // clamped by a shorter view
 }
+
+/* The build line doubles as a readout while this is being chased: Y is the
+   page scroll. Y 0 on a tab you have just opened means the layout is right
+   and nothing moved it. */
+function stampLine(){
+  const st=document.getElementById("stamp");
+  if(!st) return;
+  const y = Math.round(window.scrollY || document.documentElement.scrollTop || 0);
+  st.textContent = "BUILD "+BUILD+"  \u00b7  SCHEMA "+SCHEMA+"  \u00b7  Y "+y;
+}
+window.addEventListener("scroll", ()=>stampLine(), {passive:true});
 
 function render(){
   if(batDrag || innDrag) return; // a redraw mid-drag would drop what is held
@@ -1793,8 +1822,7 @@ function render(){
   // is put back once more \u2014 the page scroll deliberately is not.
   requestAnimationFrame(()=>scrollRestore(keep, false));
   renderPrint();
-  const st=document.getElementById("stamp");
-  if(st) st.textContent="BUILD "+BUILD+"  ·  SCHEMA "+SCHEMA;
+  stampLine();
 }
 
 function renderTabs(){
