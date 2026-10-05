@@ -554,7 +554,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-04.2135";
+const BUILD  = "2026-10-04.2152";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -692,7 +692,7 @@ function orderSources(games, curId){
   return (games || [])
     .filter(x => x.id !== curId && !x.arch && (x.order || []).length)
     .slice()
-    .sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.created||0)-(a.created||0));
+    .sort((a,b) => gameOrder(b, a));
 }
 
 /* The tablet shows a window of innings rather than all six. Six columns on a
@@ -989,10 +989,21 @@ function tallyMany(list, mode){
 const archived = g => !!g.arch;
 const liveGames = () => S.games.filter(x=>!archived(x));
 
+/* One ordering rule for the whole app: the date a game was PLAYED, with the
+   time its card was created as the tiebreak. Ordering by creation time alone
+   inverted a weekend: set up Sunday's card on Friday and Sunday reported no
+   previous game while Saturday treated Sunday as its last one. The tiebreak
+   is what still orders a doubleheader, where both games share a date. */
+function gameOrder(a, b){
+  return String(a.date||"").localeCompare(String(b.date||"")) ||
+         (a.created||0) - (b.created||0);
+}
+const beforeGame = (x, g) => gameOrder(x, g) < 0;
+
 function priorGames(){
   const g=game(); if(!g) return [];
-  return liveGames().filter(x=>x.id!==g.id && (x.created||0) < (g.created||0))
-                    .sort((a,b)=>(b.created||0)-(a.created||0));
+  return liveGames().filter(x=>x.id!==g.id && beforeGame(x, g))
+                    .sort((a,b)=>gameOrder(b, a));
 }
 
 /* ---- Season totals ----------------------------------------------------
@@ -1005,7 +1016,14 @@ function priorGames(){
    so they cannot drift apart the way two separate tables did. */
 function seasonGames(exceptId, includeToday){
   const list = liveGames();
-  return includeToday ? list : list.filter(x=>x.id!==exceptId);
+  const g = exceptId ? S.games.find(x=>x.id===exceptId) : null;
+  if(!g) return list;                       // no anchor \u2014 the whole season
+  /* "So far" has to mean played before this one. Filtering only by id let a
+     card drafted for next week, or the second game of a doubleheader set up
+     first, count as history and move the figures being read to decide today.
+     A game is history only if it comes earlier in the running order. */
+  const past = list.filter(x => beforeGame(x, g));
+  return includeToday ? past.concat(list.filter(x => x.id === g.id)) : past;
 }
 function seasonTotals(exceptId, mode, includeToday){
   const list = seasonGames(exceptId, includeToday);
@@ -1063,10 +1081,32 @@ function owedStatus(g, card){
 
   const bench = mark(owed.bench, "bench"), infield = mark(owed.infield, "infield");
   const all = bench.concat(infield);
-  return { bench, infield,
-           anyOwed: all.some(r=>r.state==="owed"),
-           anyOk:   all.some(r=>r.state==="ok"),
+  /* Counts, not just flags. The banner used to end with a bare "handled by
+     today\'s card" whenever ANY one name was addressed, which read as all
+     clear while four kids were still short \u2014 and the tick could come from a
+     name the top-three cut had hidden. Reporting n of m cannot do that. */
+  const okN   = all.filter(r=>r.state==="ok").length;
+  const outN  = all.filter(r=>r.state==="out").length;
+  const owedN = all.filter(r=>r.state==="owed").length;
+  return { bench, infield, okN, outN, owedN,
+           anyOwed: owedN > 0,
+           anyOk:   okN > 0,
            count:   all.length };
+}
+
+/* The one sentence the banner ends on. It has to be true at a glance: how
+   many of the kids who are owed something are getting it from this card, and
+   how many are still short. "Handled" with no number was the bug \u2014 it said
+   all clear while most of the list was still owed. */
+function owedSummary(st){
+  if(!st || !st.count) return "";
+  const bits = [];
+  if(st.okN)   bits.push("\u2713 " + st.okN + " of " + st.count + " addressed by today\'s card");
+  if(st.owedN) bits.push(st.owedN + " still short");
+  if(st.outN)  bits.push(st.outN + " out today");
+  if(!st.owedN && st.okN === st.count)
+    return "All " + st.count + " addressed by today\'s card \u2014 the season figures update after the game.";
+  return bits.join(", ") + ".";
 }
 
 /* Who is owed: most bench per game, and least infield share. */
@@ -1755,12 +1795,12 @@ function viewLineup(g){
   const owedFlag = owed.count ? `<div class="check ${owed.anyOwed?"info":"ok"}">
       <span class="tag">SEASON</span><span>${[
         owed.bench.length   ? `Most bench so far: ${owed.bench.slice(0,3).map(r=>
-            esc(r.name)+" ("+fmtInn(r.BN)+" over "+r.games+")"+mk(r)).join(", ")}` : "",
+            esc(r.name)+" ("+fmtInn(r.BN)+" over "+r.games+")"+mk(r)).join(", ")}${
+            owed.bench.length>3?` +${owed.bench.length-3} more`:""}` : "",
         owed.infield.length ? `Least infield: ${owed.infield.slice(0,3).map(r=>
-            esc(r.name)+" ("+Math.round(r.infShare*100)+"%)"+mk(r)).join(", ")}` : "",
-        owed.anyOwed
-          ? (owed.anyOk ? "\u2713 handled by today's card." : "")
-          : "All handled by today's card \u2014 the season figures update after the game."
+            esc(r.name)+" ("+Math.round(r.infShare*100)+"%)"+mk(r)).join(", ")}${
+            owed.infield.length>3?` +${owed.infield.length-3} more`:""}` : "",
+        owedSummary(owed)
       ].filter(Boolean).join(" \u00b7 ")}</span></div>` : "";
   const paint = c => `<div class="check ${c.lv}"><span class="tag">${c.tag}</span><span>${esc(c.msg)}</span></div>`;
   const checks = noteFlag + liveFlag + owedFlag
@@ -2797,9 +2837,20 @@ document.addEventListener("click",e=>{
     if(b.id==="impGo"){
       if(!when){ out.innerHTML+=`<div class="check err"><span class="tag">DATE</span><span>Set the date first — trends are ordered by it.</span></div>`; return; }
       if(r.unknown.length) return;
-      const id="g_"+when.replace(/-/g,"");
-      if(S.games.some(g=>g.id===id) && !confirm("A game on "+fmtDate(when)+" already exists. Replace it?")) return;
-      S.games=S.games.filter(g=>g.id!==id);
+      /* The id used to be the date alone, so importing a second game played
+         the same day silently offered to overwrite the first \u2014 there was no
+         way to keep both halves of a doubleheader. The date id is still used
+         for the first game of a day, which keeps every game already imported
+         exactly where it was; a clash now asks which you meant. */
+      let id="g_"+when.replace(/-/g,"");
+      const clash=S.games.find(g=>g.id===id);
+      if(clash){
+        const replace=confirm("A game on "+fmtDate(when)+" is already on file.\n\n"+
+          "OK \u2014 replace it with what you just pasted.\n"+
+          "Cancel \u2014 keep it and add this as a second game that day.");
+        if(replace) S.games=S.games.filter(g=>g.id!==id);
+        else id="g_"+when.replace(/-/g,"")+"_"+Date.now().toString(36).slice(-4);
+      }
       const g={id,date:when,opp:"",innings:innCount,bslots:1,out:r.out,
         order:r.order.length?r.order:regulars().filter(p=>!r.out.includes(p.id)).map(p=>p.id),
         slots:r.slots,created:Date.parse(when)};
@@ -2881,7 +2932,7 @@ function newGame(from){
   S.games.push(g); S.cur=id; tab="lineup";
   saveCur(); commit(); writeGame(g); refreshPicker();
 }
-function reorderGames(){ S.games.sort((a,b)=>(a.date||"").localeCompare(b.date||"")); }
+function reorderGames(){ S.games.sort(gameOrder); }
 function saveCur(){ try{ localStorage.setItem(LS+"_cur",S.cur||""); }catch(e){} }
 /* A season lives in one Firebase project with no backups and no history. This
    is the way out: plain CSV, one row per player per game, opens in any sheet. */
@@ -2889,7 +2940,7 @@ function seasonCsv(){
   const q = v => `"${String(v==null?"":v).replace(/"/g,'""')}"`;
   const rows = [["Date","Opponent","Home/Away","Innings played","Card",
                  "Player","INF","OF","Bench","Positions"].map(q).join(",")];
-  liveGames().slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(g=>{
+  liveGames().slice().sort(gameOrder).forEach(g=>{
     ["plan","live"].forEach(mode=>{
       if(mode==="live" && !hasActual(g)) return;         // no fork, no second row set
       const label = hasActual(g) ? (mode==="plan"?"Pregame":"Game day") : "Lineup";
@@ -2933,7 +2984,7 @@ function copyGame(g){ const o = {id:g.id,date:g.date||"",opp:g.opp||"",innings:g
 
 function refreshPicker(){
   const sel=document.getElementById("gamePick");
-  const sorted=[...S.games].filter(g=>!archived(g)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const sorted=[...S.games].filter(g=>!archived(g)).sort((a,b)=>gameOrder(b,a));
   sel.innerHTML=sorted.map(g=>
     `<option value="${g.id}" ${g.id===S.cur?"selected":""}>${fmtDate(g.date)}${g.opp?" "+esc(vsLabel(g)):""}</option>`
   ).join("") || `<option>No games</option>`;
