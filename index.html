@@ -554,7 +554,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-04.2231";
+const BUILD  = "2026-10-04.2239";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1750,7 +1750,18 @@ function scrollSnap(){
    lost the position \u2014 a shorter view clamping the scroll. Nothing is ever
    written to the page scroll a frame later. */
 function scrollRestore(s, page){
-  if(!s || s.tab !== tab) return;                 // a new tab starts at the top
+  if(!s) return;
+  if(s.tab !== tab){
+    /* A new tab must START at the top. Skipping the restore was not enough:
+       the browser keeps the document scroll across an innerHTML swap, so
+       switching from a long tab to a short one left you partway down it. On
+       the Game tab that put the Date and Opponent fields off-screen above,
+       and the only way back was a swipe the browser took for pull-to-refresh.
+       Nothing is restored here, so this is the one place the page is moved
+       deliberately. */
+    if(page) window.scrollTo(0, 0);
+    return;
+  }
   const boxes=[...document.querySelectorAll(".gridscroll")];
   boxes.forEach((b,i)=>{ const x=s.boxes[i]; if(x) b.scrollLeft=x; });
   if(!page || !s.y) return;
