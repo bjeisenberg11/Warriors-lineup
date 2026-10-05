@@ -554,7 +554,7 @@ const FIREBASE_CONFIG = {
   appId: "1:921716476359:web:20afabe27fe93c6586f1e2"
 };
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-04.2152";
+const BUILD  = "2026-10-04.2218";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -693,6 +693,43 @@ function orderSources(games, curId){
     .filter(x => x.id !== curId && !x.arch && (x.order || []).length)
     .slice()
     .sort((a,b) => gameOrder(b, a));
+}
+
+/* ---- Update check ------------------------------------------------------
+   The page is one file, so the build stamp inside the file IS the version.
+   Reading it back off the server answers both questions that have come up:
+   whether this device is running something stale, and whether an upload
+   actually landed. Pulling the stamp out of the text is kept separate from
+   fetching it so it can be tested without a network. */
+function parseBuild(text){
+  const m = /const\s+BUILD\s*=\s*"([^"]+)"/.exec(String(text||""));
+  return m ? m[1] : null;
+}
+/* Build stamps are "YYYY-MM-DD.HHMM", which compares correctly as text. A
+   stamp in any other shape is reported as uncomparable rather than guessed
+   at \u2014 a wrong guess here either nags forever or hides a real update. */
+function compareBuilds(remote, local){
+  if(!remote || !local) return "unknown";
+  if(remote === local)  return "same";
+  const ok = v => /^\d{4}-\d{2}-\d{2}\.\d{3,4}$/.test(v);
+  if(!(ok(remote) && ok(local))) return "unknown";
+  return remote > local ? "newer" : "older";
+}
+/* What the line under the button says. "older" is not a nonsense state: it is
+   what an upload that did not commit looks like from here, which has happened
+   before and was invisible at the time. */
+function updateLine(st, local){
+  if(!st || st.state === "idle")
+    return "Running build " + local + ". GitHub serves a cached copy for up to " +
+           "10 minutes after an upload, so a brand-new build can take a few minutes to appear.";
+  if(st.state === "checking") return "Checking\u2026";
+  if(st.state === "error")    return "Couldn\'t check the server: " + st.err + ". Running build " + local + ".";
+  if(st.state === "same")     return "You\'re on the latest build (" + local + ").";
+  if(st.state === "newer")    return "Build " + st.build + " is on the server. You\'re running " + local + ".";
+  if(st.state === "older")
+    return "The server is on an OLDER build (" + st.build + ") than this device (" + local +
+           "). That usually means the upload didn\'t commit.";
+  return "The server reports build " + st.build + ", which can\'t be compared with " + local + ".";
 }
 
 /* The tablet shows a window of innings rather than all six. Six columns on a
@@ -1413,6 +1450,35 @@ function loadLocal(){
    Every failure carries a code, and the Game tab shows the last one. */
 const SYNC = { mode:"local", detail:"this device only", pending:0, lastAt:null, lastErr:null, log:[] };
 const codeOf = e => (e && (e.code || e.name)) || "unknown";
+
+/* Update check. The query string is what gets past the browser cache \u2014
+   no-store alone is not enough on iOS \u2014 and the reload uses one too, or the
+   reload just re-serves the copy we were trying to replace. */
+let UPD = { state:"idle", build:null, err:null, at:0 };
+
+async function checkUpdate(){
+  UPD = { state:"checking", build:null, err:null, at:Date.now() };
+  render();
+  try{
+    let res;
+    // A rejected fetch surfaces as a bare "TypeError", which says nothing.
+    // Separating it from a bad response keeps every failure identifiable.
+    try{ res = await fetch(location.pathname + "?v=" + Date.now(), { cache:"no-store" }); }
+    catch(e){ const n=new Error("net"); n.code="NO NETWORK ("+codeOf(e)+")"; throw n; }
+    if(!res.ok){ const e=new Error("http"); e.code="HTTP "+res.status; throw e; }
+    const b = parseBuild(await res.text());
+    if(!b){ const e=new Error("parse"); e.code="NO BUILD STAMP"; throw e; }
+    UPD = { state: compareBuilds(b, BUILD), build:b, err:null, at:Date.now() };
+    note("update check: server "+b+", running "+BUILD);
+  }catch(e){
+    UPD = { state:"error", build:null, err:codeOf(e), at:Date.now() };
+    note("update check failed: "+UPD.err);
+  }
+  render();
+}
+function reloadLatest(){
+  location.replace(location.pathname + "?v=" + Date.now() + (location.hash||""));
+}
 function note(msg){
   SYNC.log.unshift(new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit",second:"2-digit"})+"  "+msg);
   SYNC.log = SYNC.log.slice(0,12);
@@ -1635,11 +1701,27 @@ function scrollSnap(){
     y: window.scrollY || document.documentElement.scrollTop || 0
   };
 }
-function scrollRestore(s){
+/* The grid's sideways position is safe to put back at any time: it is a box
+   inside the page and nothing else writes to it.
+
+   The PAGE position is not. Writing it a frame later lands in the middle of a
+   flick \u2014 the live listener fires, or a sync arrives \u2014 and drags the page
+   back under the finger. On a trackpad that is invisible, because the scroll
+   has already stopped by the time the frame runs. On iOS, where momentum keeps
+   going after the finger lifts, it made the Game tab impossible to scroll up:
+   every redraw hauled you back down and only a reload cleared it.
+
+   So the page is only ever corrected in the SAME tick as the redraw, where no
+   scrolling can have happened in between, and only when the redraw actually
+   lost the position \u2014 a shorter view clamping the scroll. Nothing is ever
+   written to the page scroll a frame later. */
+function scrollRestore(s, page){
   if(!s || s.tab !== tab) return;                 // a new tab starts at the top
   const boxes=[...document.querySelectorAll(".gridscroll")];
   boxes.forEach((b,i)=>{ const x=s.boxes[i]; if(x) b.scrollLeft=x; });
-  if(s.y) window.scrollTo(0, s.y);
+  if(!page || !s.y) return;
+  const now = window.scrollY || document.documentElement.scrollTop || 0;
+  if(now < s.y - 4) window.scrollTo(0, s.y);      // clamped by a shorter view
 }
 
 function render(){
@@ -1654,10 +1736,10 @@ function render(){
     lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, notes:viewNotes, game:viewGame
   }[tab])(g) + (tab==="lineup" ? viewSplit() : "");
   drawnTab = tab;
-  scrollRestore(keep);
-  // iOS settles layout a frame later, and a mid-flight momentum scroll can
-  // overwrite the first write, so the position is put back once more.
-  requestAnimationFrame(()=>scrollRestore(keep));
+  scrollRestore(keep, true);                      // same tick: page included
+  // iOS settles the grid's own layout a frame later, so its sideways position
+  // is put back once more \u2014 the page scroll deliberately is not.
+  requestAnimationFrame(()=>scrollRestore(keep, false));
   renderPrint();
   const st=document.getElementById("stamp");
   if(st) st.textContent="BUILD "+BUILD+"  ·  SCHEMA "+SCHEMA;
@@ -2431,6 +2513,18 @@ function viewGame(g){
     </table>
     ${SYNC.log.length?`<div class="log">${SYNC.log.map(l=>esc(l)).join("<br>")}</div>`:""}
     <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="checkUpd" ${UPD.state==="checking"?"disabled":""}>${
+        UPD.state==="checking"?"Checking\u2026":"Check for update"}</button>
+      ${UPD.state==="newer"?`<button class="btn primary" id="doReload">Reload to ${esc(UPD.build)}</button>`:""}
+    </div>
+    <div class="check ${
+      UPD.state==="newer" ? "info" : (UPD.state==="older"||UPD.state==="error") ? "warn" :
+      UPD.state==="same" ? "ok" : "info"}" style="margin-top:8px">
+      <span class="tag">${
+        UPD.state==="newer"?"UPDATE":UPD.state==="older"?"BEHIND":UPD.state==="error"?"NO ANSWER":
+        UPD.state==="same"?"CURRENT":UPD.state==="unknown"?"UNCLEAR":"VERSION"}</span>
+      <span>${esc(updateLine(UPD, BUILD))}</span></div>
+    <div class="row" style="margin-top:10px">
       <button class="btn ghost" id="copyDiag">Copy diagnostics</button>
       <button class="btn ghost" id="pushAll">Re-send everything</button>
     </div>
@@ -2858,6 +2952,8 @@ document.addEventListener("click",e=>{
       saveCur(); commit(); writeGame(g); refreshPicker();
     }
   }
+  else if(b.id==="checkUpd") checkUpdate();
+  else if(b.id==="doReload") reloadLatest();
   else if(b.id==="copyDiag"){
     const txt=["Warriors lineup diagnostics","build "+BUILD+" · schema "+SCHEMA+" · team "+TEAM_ID,
       "connection "+SYNC.mode+" · pending "+SYNC.pending,
