@@ -66,7 +66,30 @@ button{cursor:pointer;border:none;background:none}
 /* ---------- Header ---------- */
 /* Header and tabs stick as ONE block. Pinning both to top:0 separately made
    the tabs slide underneath the header on scroll. */
-#chrome{position:sticky;top:0;z-index:40}
+/* The page itself does not scroll \u2014 the content does.
+
+   Chrome on iOS hangs pull-to-refresh off the DOCUMENT's scroll view, so any
+   upward swipe that reached the top of the document became a reload. Three
+   attempts to tame that from inside the document failed in turn: the browser
+   restores the scroll after the app draws, it ignores overscroll-behavior
+   because it is WebKit underneath, and preventDefault on a gesture already in
+   flight is not reliably honoured. An inner scroller removes the question:
+   there is no document scroll to overscroll, so there is nothing to attach a
+   reload to, nothing for the browser to restore, and "start at the top" is a
+   number this app owns.
+
+   Screen only. Print still lays the sheet out in normal flow \u2014 a fixed-height
+   body with hidden overflow would clip it to one screen. */
+@media screen{
+  html{height:100%}
+  body{height:100%;display:flex;flex-direction:column;overflow:hidden}
+  #chrome{flex:0 0 auto}
+  #scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
+  body.display-on #scroll{display:none}
+  body.display-on #display{flex:1 1 auto;min-height:0}
+}
+#chrome{z-index:40}
 .top{
   background:var(--ink);color:#fff;
   padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
@@ -164,9 +187,10 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
   .wrap{max-width:none;padding:10px}
   .split{display:flex;gap:12px;align-items:flex-start}
   .splitmain{flex:1 1 auto;min-width:0}
-  .splitside{flex:0 0 288px;position:sticky;
-    top:calc(var(--chrome-h, 0px) + 10px);
-    max-height:calc(100vh - var(--chrome-h, 0px) - 22px);
+  /* Sticky within #scroll now, so the chrome height no longer enters into
+     it \u2014 the scroller already starts below the header. */
+  .splitside{flex:0 0 288px;position:sticky;top:10px;
+    max-height:calc(100% - 22px);
     overflow-y:auto;-webkit-overflow-scrolling:touch}
   .splitside .card{margin-bottom:10px}
   .rotatehint{display:none}
@@ -417,7 +441,8 @@ table.diag td:first-child{color:var(--mute);width:38%;font-family:var(--body);fo
 #display{display:none}
 body.display-on{overflow:hidden;background:var(--ink)}
 body.display-on #chrome,body.display-on .top,body.display-on .tabs,
-body.display-on .wrap,body.display-on .stamp{display:none!important}
+body.display-on .wrap,body.display-on .stamp,
+body.display-on #scroll{display:none!important}
 body.display-on #display{display:block}
 .dwrap{height:100vh;height:100dvh;display:flex;flex-direction:column;
   padding:1.4vh 1.6vh;gap:1.2vh;color:#fff;
@@ -484,7 +509,7 @@ table.dtab tr.bn td.live{color:#fff}
   .psheet{transform-origin:0 0}
   body.rot .psheet{position:absolute;top:0;left:0}
   body{background:#fff}
-  #chrome,.top,.tabs,.wrap,.noprint{display:none!important}
+  #chrome,.top,.tabs,.wrap,#scroll,.noprint{display:none!important}
   #print{display:block!important}
   .psheet{font-family:var(--body);color:#000}
   .phead{display:flex;align-items:center;gap:9px;border-bottom:3px solid #C8102E;
@@ -532,8 +557,10 @@ table.dtab tr.bn td.live{color:#fff}
 
 <div class="tabs" id="tabs"></div>
 </div>
+<div id="scroll">
 <div class="wrap" id="view"></div>
 <div class="stamp noprint" id="stamp"></div>
+</div>
 
 <div id="display"></div>
 <div id="print"></div>
@@ -561,7 +588,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-04.2304";
+const BUILD  = "2026-10-04.2322";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1690,55 +1717,12 @@ function measureChrome(){
 window.addEventListener("resize", measureChrome);
 window.addEventListener("orientationchange", ()=>setTimeout(measureChrome, 200));
 
-/* --- Pull-to-refresh --------------------------------------------------
-   The Opponent and Date fields sit at the top of the Game tab, so reaching
-   them means swiping down while the page is already at the top \u2014 which is
-   exactly the gesture Chrome on iOS treats as pull-to-refresh. Editing the
-   opponent reloaded the app instead.
-
-   overscroll-behavior is set above and handles Android and desktop Chrome,
-   but Chrome on iOS is WebKit underneath and ignores it, so the gesture has
-   to be cancelled directly. This only fires when the page is already at the
-   very top and the finger is moving DOWN \u2014 a position where there is no
-   downward scrolling left to do, so nothing legitimate is blocked. Anything
-   with its own scrollbar (the inning grid, a textarea) is left alone, or
-   swiping those near the top of the page would stick. */
-/* Hold the top for a few frames after a tab change. Cancelled by a touch,
-   so it only ever wins against the browser, never against the user. */
-let topHold = [];
-function toTop(){
-  dropTopHold();
-  window.scrollTo(0, 0);
-  const again = () => { if(!topHold.length) return; window.scrollTo(0, 0); };
-  topHold.push(requestAnimationFrame(()=>{ again(); topHold.push(setTimeout(again, 60)); }));
-  topHold.push(setTimeout(()=>{ again(); dropTopHold(); }, 220));
-}
-function dropTopHold(){
-  topHold.forEach(h=>{ clearTimeout(h); cancelAnimationFrame(h); });
-  topHold = [];
-}
-
-let ptrY = 0;
-const scrollableUnder = el => {
-  for(let n = el; n && n !== document.body; n = n.parentElement){
-    if(n.classList && n.classList.contains("gridscroll")) return true;
-    const tag = n.tagName;
-    if(tag === "TEXTAREA" || tag === "SELECT") return true;
-  }
-  return false;
-};
-document.addEventListener("touchstart", e=>{
-  ptrY = e.touches && e.touches[0] ? e.touches[0].clientY : 0;
-  dropTopHold();                                       // the user wins, always
-}, {passive:true});
-document.addEventListener("touchmove", e=>{
-  if(!e.cancelable || !e.touches || !e.touches[0]) return;
-  const atTop = (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
-  if(!atTop) return;                                   // mid-page: never interfere
-  if(e.touches[0].clientY <= ptrY) return;             // moving up: a real scroll
-  if(scrollableUnder(e.target)) return;                // its own scroller
-  e.preventDefault();
-}, {passive:false});
+/* --- The scroller ------------------------------------------------------
+   One accessor, so nothing reads the page scroll by accident. Everything that
+   used window.scrollY now goes through here; the document does not scroll. */
+const scroller = () => document.getElementById("scroll");
+const scrollY  = () => { const el = scroller(); return el ? el.scrollTop : 0; };
+function scrollToTop(){ const el = scroller(); if(el) el.scrollTop = 0; }
 
 /* --- Holding your place across a redraw ---------------------------------
    Every pick runs through commit() -> render(), and render() replaces the
@@ -1755,7 +1739,7 @@ function scrollSnap(){
   return {
     tab: drawnTab,
     boxes: [...document.querySelectorAll(".gridscroll")].map(b=>b.scrollLeft),
-    y: window.scrollY || document.documentElement.scrollTop || 0
+    y: scrollY()
   };
 }
 /* The grid's sideways position is safe to put back at any time: it is a box
@@ -1784,14 +1768,14 @@ function scrollRestore(s, page){
        Date and Opponent fields hidden above the fold. So the top is asserted
        again over the next moment, and abandoned the instant a finger lands
        so it can never fight a real scroll. */
-    if(page) toTop();
+    if(page) scrollToTop();
     return;
   }
   const boxes=[...document.querySelectorAll(".gridscroll")];
   boxes.forEach((b,i)=>{ const x=s.boxes[i]; if(x) b.scrollLeft=x; });
   if(!page || !s.y) return;
-  const now = window.scrollY || document.documentElement.scrollTop || 0;
-  if(now < s.y - 4) window.scrollTo(0, s.y);      // clamped by a shorter view
+  const el = scroller(); if(!el) return;
+  if(el.scrollTop < s.y - 4) el.scrollTop = s.y;  // clamped by a shorter view
 }
 
 /* The build line doubles as a readout while this is being chased: Y is the
@@ -1800,10 +1784,10 @@ function scrollRestore(s, page){
 function stampLine(){
   const st=document.getElementById("stamp");
   if(!st) return;
-  const y = Math.round(window.scrollY || document.documentElement.scrollTop || 0);
+  const y = Math.round(scrollY());
   st.textContent = "BUILD "+BUILD+"  \u00b7  SCHEMA "+SCHEMA+"  \u00b7  Y "+y;
 }
-window.addEventListener("scroll", ()=>stampLine(), {passive:true});
+document.addEventListener("scroll", ()=>stampLine(), {passive:true, capture:true});
 
 function render(){
   if(batDrag || innDrag) return; // a redraw mid-drag would drop what is held
