@@ -70,5 +70,7 @@ Slot keys look like `i3_SS` (inning 3, shortstop) or `i2_BN1` (bench). Rules mus
 - There are no backups. The season CSV export (`seasonCsv`) is the only way to get data out.
 
 ## Working in this repo
+- The owner wants changes pushed straight to `main` (no branch or PR, no asking first). Bump `BUILD` with each app change; GitHub Pages publishes about a minute after the push.
+- If a Pages build gets stuck or fails on GitHub's side, a small real commit to `main` starts a fresh one. Never set Settings → Pages → Branch to None: that unpublishes the site (the app 404s) until a deploy succeeds.
 - Don't add a build system or split the file without being asked. Single-file static hosting is intentional.
 - To test locally, serve the directory (for example, `python3 -m http.server`) and open `index.html`. It connects to the **live** Firestore project, so edits you make are real team data. To experiment safely, set `FIREBASE_CONFIG = null` or use a different `TEAM_ID`, and change it back before committing.
