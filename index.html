@@ -306,6 +306,9 @@ table.pmx td{font-family:var(--mono);font-size:13px;text-align:center;padding:7p
 table.pmx td.l{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;padding-right:3px}
 table.pmx td.z{color:#CBD0D6}
+table.pmx th button{all:unset;cursor:pointer;display:block;width:100%;text-align:inherit;
+  padding:4px 0;-webkit-tap-highlight-color:transparent}
+table.pmx th.on{color:var(--ink,#23262B)}
 table.pmx th.bn,table.pmx td.bn{background:#FAFAFB}
 table.pmx td.bn{color:var(--steel)}
 .slist{margin:0 -3px}
@@ -588,7 +591,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-08.2227";
+const BUILD  = "2026-10-08.2325";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -2401,6 +2404,7 @@ const owedAvgBn = rows => rows.length ? rows.reduce((a,r)=>a+r.bnPerGame,0)/rows
 let openRow   = null;        // one expanded player at a time
 let posOpen   = false;       // the Lineup tab\'s position reference
 let trendView = "pos";       // "pos" = position matrix, "owed" = fairness list
+let pmxSort   = null;        // matrix column sorted high to low; null = by name
 
 function viewTrends(g){
   const incToday = document.body.dataset.incCur==="1";
@@ -2419,10 +2423,16 @@ function viewTrends(g){
   /* The matrix: one row per kid, one column per position, no sideways scroll.
      This is the view that answers "how often has he pitched" at a glance. */
   const matrix = () => {
-    const byName = rows.slice().sort((a,b)=>a.name.localeCompare(b.name));
+    /* Tap a column header to sort that column high to low; tap it again, or
+       Player, to go back to alphabetical. Ties stay alphabetical. */
+    const val = (r,k) => k==="BN" ? (r.BN||0) : (r.pos[k]||0);
+    const byName = rows.slice().sort((a,b)=>
+      (pmxSort ? val(b,pmxSort)-val(a,pmxSort) : 0) || a.name.localeCompare(b.name));
+    const th = (k, cls) => `<th class="${cls||""}${pmxSort===k?" on":""}"><button data-pmxsort="${
+      k}">${k==="name"?"Player":k}${pmxSort===k?" \u25be":""}</button></th>`;
     return `<table class="pmx">
-      <thead><tr><th class="l">Player</th>${
-        POSK.map(k=>`<th>${k}</th>`).join("")}<th class="bn">BN</th></tr></thead>
+      <thead><tr>${th("name","l")}${
+        POSK.map(k=>th(k)).join("")}${th("BN","bn")}</tr></thead>
       <tbody>${byName.map(r=>`<tr>
         <td class="l">${esc(r.name)}</td>
         ${POSK.map(k=>{
@@ -2433,7 +2443,7 @@ function viewTrends(g){
       </tr>`).join("")}</tbody>
     </table>
     <div class="hint">Innings at each position. Part-innings read like innings pitched
-      \u2014 2.1 is two and a third.</div>`;
+      \u2014 2.1 is two and a third. Tap a column to sort it high to low.</div>`;
   };
 
   const body = sorted.map(r=>{
@@ -2957,6 +2967,10 @@ document.addEventListener("click",e=>{
     commit(); writeRoster();
   }
   else if(b.dataset.view){ trendView = b.dataset.view; render(); }
+  else if(b.dataset.pmxsort){
+    const k = b.dataset.pmxsort;
+    pmxSort = (k==="name" || pmxSort===k) ? null : k; render();
+  }
   else if(b.dataset.exp){ openRow = (openRow===b.dataset.exp) ? null : b.dataset.exp; render(); }
   else if(b.id==="incCur"){
     document.body.dataset.incCur = document.body.dataset.incCur==="1"?"0":"1"; render();
