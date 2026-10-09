@@ -588,7 +588,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-08.2223";
+const BUILD  = "2026-10-08.2227";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1262,13 +1262,20 @@ function runChecks(card, mode){
     if(ev.extra) want[ev.base+1] = ev.extra;
     if(n - ev.extra) want[ev.base] = n - ev.extra;
     const have = {};
+    let placed = 0;
     pres.forEach(p=>{ const r=t[p.id]; if(!r) return;
+      placed += r.BN;
       const k = fmtSits(r.BN); have[k]=(have[k]||0)+1; });
     const same = Object.keys(want).length === Object.keys(have).length &&
       Object.keys(want).every(k=>have[fmtSits(+k)]===want[k]);
+    // An unfinished bench would read as kids who "don't sit", so the card is
+    // only compared once every bench spot is filled.
+    const cardLine = placed < benchTotal
+      ? `Card so far: ${fmtSits(placed)} of ${benchTotal} sits placed.`
+      : same ? "This card matches." : `This card: ${sitsLine(have)}.`;
     out.push({lv:"info",tag:"EVEN SPLIT",
-      msg:`${n} in over ${scoredInnings(g)} innings = ${benchTotal} bench innings. Even: ${
-        sitsLine(want)}. ${same ? "This card matches." : "This card: "+sitsLine(have)+"."}`});
+      msg:`${n} in, ${FIELD_N} on the field → ${n-FIELD_N} ${n-FIELD_N===1?"sits":"sit"} each inning × ${
+        scoredInnings(g)} = ${benchTotal} sits. Even: ${sitsLine(want)}. ${cardLine}`});
   }
 
   const overBench=[], atBench=[], bench2b2=[], of3=[], samePos=[];
@@ -1319,12 +1326,13 @@ function evenBench(n, innings){
 }
 /* Bench time as a count of sits: whole innings read "2", split ones "1.2". */
 const fmtSits = v => Number.isInteger(v) ? String(v) : fmtInn(v);
-/* {"2":1,"1":10} -> "1 sits 2×, 10 sit 1×", most bench first. */
+/* {"2":1,"1":10} -> "10 sit once, 1 sits twice", fewest sits first. */
 function sitsLine(counts){
-  return Object.keys(counts).sort((a,b)=>parseFloat(b)-parseFloat(a)).map(k=>{
+  const times = k => k==="1" ? "once" : k==="2" ? "twice" : k+"×";
+  return Object.keys(counts).sort((a,b)=>parseFloat(a)-parseFloat(b)).map(k=>{
     const c = counts[k], one = c===1;
     return k==="0" ? `${c} ${one?"doesn't":"don't"} sit`
-                   : `${c} ${one?"sits":"sit"} ${k}×`;
+                   : `${c} ${one?"sits":"sit"} ${times(k)}`;
   }).join(", ");
 }
 const errCount = (card, mode) => runChecks(card, mode).filter(c=>c.lv==="err").length;
