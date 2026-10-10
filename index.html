@@ -189,9 +189,12 @@ tr.benchrow .poscell{background:#FAFAFB;color:var(--steel)}
   .splitmain{flex:1 1 auto;min-width:0}
   /* Sticky within #scroll now, so the chrome height no longer enters into
      it \u2014 the scroller already starts below the header. */
+  /* Its own scroller: a percentage max-height resolved against .split (as tall
+     as the grid), so it never capped and the tally rode along with the page.
+     --scroll-h is the visible height of #scroll, measured in measureChrome. */
   .splitside{flex:0 0 288px;position:sticky;top:10px;
-    max-height:calc(100% - 22px);
-    overflow-y:auto;-webkit-overflow-scrolling:touch}
+    max-height:calc(var(--scroll-h, 100vh) - 20px);
+    overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .splitside .card{margin-bottom:10px}
   .rotatehint{display:none}
   .top{padding-top:calc(5px + env(safe-area-inset-top));padding-bottom:5px}
@@ -591,7 +594,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-08.2325";
+const BUILD  = "2026-10-09.1907";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1758,6 +1761,8 @@ function measureChrome(){
   const c = document.getElementById("chrome");
   const h = c && c.offsetHeight ? c.offsetHeight : 0;
   document.documentElement.style.setProperty("--chrome-h", h+"px");
+  const sc = document.getElementById("scroll");
+  if(sc && sc.clientHeight) document.documentElement.style.setProperty("--scroll-h", sc.clientHeight+"px");
 }
 window.addEventListener("resize", measureChrome);
 window.addEventListener("orientationchange", ()=>setTimeout(measureChrome, 200));
@@ -1784,6 +1789,7 @@ function scrollSnap(){
   return {
     tab: drawnTab,
     boxes: [...document.querySelectorAll(".gridscroll")].map(b=>b.scrollLeft),
+    side: (document.querySelector(".splitside")||{}).scrollTop || 0,
     y: scrollY()
   };
 }
@@ -1818,6 +1824,9 @@ function scrollRestore(s, page){
   }
   const boxes=[...document.querySelectorAll(".gridscroll")];
   boxes.forEach((b,i)=>{ const x=s.boxes[i]; if(x) b.scrollLeft=x; });
+  // The landscape tally scrolls on its own; a redraw must not snap it to the top.
+  const side = document.querySelector(".splitside");
+  if(page && side && s.side) side.scrollTop = s.side;
   if(!page || !s.y) return;
   const el = scroller(); if(!el) return;
   if(el.scrollTop < s.y - 4) el.scrollTop = s.y;  // clamped by a shorter view
@@ -1846,6 +1855,7 @@ function render(){
     lineup:viewLineup, who:viewWho, bat:viewBat, trends:viewTrends, notes:viewNotes, game:viewGame
   }[tab])(g) + (tab==="lineup" ? viewSplit() : "");
   drawnTab = tab;
+  measureChrome();                                // keeps --scroll-h current for the tally
   scrollRestore(keep, true);                      // same tick: page included
   // iOS settles the grid's own layout a frame later, so its sideways position
   // is put back once more \u2014 the page scroll deliberately is not.
