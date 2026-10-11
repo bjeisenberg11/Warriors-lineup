@@ -115,6 +115,8 @@ button{cursor:pointer;border:none;background:none}
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7'><path d='M1 1l4 4 4-4' stroke='%23AEB5BD' stroke-width='1.6' fill='none'/></svg>");
   background-repeat:no-repeat;background-position:right 10px center;padding-right:26px;
 }
+.gamebar select.seasonpick{flex:0 1 auto;max-width:34%;font-family:var(--disp);font-weight:600;
+  letter-spacing:.03em;text-transform:uppercase;padding-right:24px}
 .newbtn{background:var(--red);color:#fff;border-radius:7px;padding:8px 12px;
   font-family:var(--disp);font-weight:600;font-size:15px;letter-spacing:.05em;
   text-transform:uppercase;flex:none}
@@ -568,6 +570,7 @@ table.dtab tr.bn td.live{color:#fff}
     <button class="status" id="syncBtn" aria-label="Connection details"><b id="syncState">Local</b><span id="syncNote">this device</span></button>
   </div>
   <div class="gamebar">
+    <select id="seasonPick" class="seasonpick" aria-label="Choose season"></select>
     <select id="gamePick" aria-label="Choose game"></select>
     <button class="newbtn" id="newGame">+ Game</button>
   </div>
@@ -606,7 +609,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-11.0031";
+const BUILD  = "2026-10-11.0038";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1523,13 +1526,40 @@ let tab = "lineup";
 
 /* ---------------- Local cache (mirror of the server, never the source of truth) --- */
 const LS = "warriors_lineup_v1";
+
+/* ---------------- Seasons ----------------
+   Each season has its own roster, games and notes. Fall 2026 is the original
+   data, left exactly where it always was (teams/{TEAM_ID} and its games and
+   notes); later seasons live under teams/{TEAM_ID}/seasons/{id}. The list of
+   later seasons is the `seasons` array on the team document. Which season a
+   device shows is per device: the newest, unless someone picked one here. */
+const LEGACY_SEASON = { id:"fall2026", name:"Fall 2026" };
+let SEASONS = [LEGACY_SEASON];
+let SEASON  = LEGACY_SEASON.id;
+const isLegacy  = () => SEASON === LEGACY_SEASON.id;
+const seasonName = () => (SEASONS.find(x=>x.id===SEASON)||{name:SEASON}).name;
+// The cache, and the remembered game, are per season; the legacy keys stay as they were.
+const lsKey = () => isLegacy() ? LS : LS+"_s_"+SEASON;
+function loadSeasonPrefs(){
+  try{
+    const list = JSON.parse(localStorage.getItem(LS+"_seasons")||"[]");
+    if(Array.isArray(list)) SEASONS = [LEGACY_SEASON, ...list.filter(x=>x && x.id && x.id!==LEGACY_SEASON.id)];
+    const pick = localStorage.getItem(LS+"_season");
+    SEASON = SEASONS.some(x=>x.id===pick) ? pick : SEASONS[SEASONS.length-1].id;
+  }catch(e){}
+}
+function saveSeasonList(){
+  try{ localStorage.setItem(LS+"_seasons", JSON.stringify(SEASONS.slice(1))); }catch(e){}
+}
+const seasonPicked = () => { try{ return !!localStorage.getItem(LS+"_season"); }catch(e){ return false; } };
+
 function saveLocal(){
-  try{ localStorage.setItem(LS, JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games,notes:S.notes,coaches:S.coaches})); }
+  try{ localStorage.setItem(lsKey(), JSON.stringify({schema:SCHEMA,roster:S.roster,games:S.games,notes:S.notes,coaches:S.coaches})); }
   catch(e){ note("cache write failed: "+codeOf(e)); }
 }
 function loadLocal(){
   try{
-    const raw = localStorage.getItem(LS);
+    const raw = localStorage.getItem(lsKey());
     if(!raw) return false;
     const d = JSON.parse(raw);
     if(!d || !Array.isArray(d.roster)) return false;
@@ -2614,8 +2644,9 @@ function viewGame(g){
       are ignored in the tallies and trends.</span></div>`:""}
   </div>
   <div class="card">
-    <div class="h">Season <span class="rule"></span></div>
-    <div class="sub">${S.games.length} game${S.games.length===1?"":"s"} on file.</div>
+    <div class="h">Season \u00b7 ${esc(seasonName())} <span class="rule"></span></div>
+    <div class="sub">${S.games.length} game${S.games.length===1?"":"s"} on file. Switch seasons, or start a new one,
+      from the season menu at the top left.</div>
     <div class="row">
       <button class="btn" id="dupGame">Copy to new game</button>
       <button class="btn danger" id="delGame">Archive this game</button>
@@ -2667,6 +2698,7 @@ function viewGame(g){
       <tr><td>Build</td><td>${BUILD}</td></tr>
       <tr><td>Schema</td><td>${SCHEMA}</td></tr>
       <tr><td>Team</td><td>${TEAM_ID}</td></tr>
+      <tr><td>Season</td><td>${esc(seasonName())} (${esc(SEASON)})</td></tr>
     </table>
     ${SYNC.log.length?`<div class="log">${SYNC.log.map(l=>esc(l)).join("<br>")}</div>`:""}
     <div class="row" style="margin-top:10px">
@@ -2919,6 +2951,16 @@ document.addEventListener("change",e=>{
     setThird(splitCell.i, splitCell.p, +t.dataset.third, t.value);
   }
   else if(t.id==="gamePick"){ S.cur=t.value; saveCur(); render(); }
+  else if(t.id==="seasonPick"){
+    if(t.value==="__new"){
+      refreshSeasonPick();     // put the select back on the current season either way
+      const name = prompt("Name the new season (for example Spring 2027).\n\n"+
+        "It starts with this season's roster and position assignments, and no games or notes. "+
+        seasonName()+" stays as it is.");
+      if(name) createSeason(name);
+    }
+    else switchSeason(t.value);
+  }
   else if(t.id==="gDate"){ game().date=t.value; reorderGames(); commit();
     writeGameField(game().id,"date",game().date); refreshPicker(); }
   else if(t.id==="gInn"){ game().innings=+t.value; commit();
@@ -3211,7 +3253,7 @@ function newGame(from){
   saveCur(); commit(); writeGame(g); refreshPicker();
 }
 function reorderGames(){ S.games.sort(gameOrder); }
-function saveCur(){ try{ localStorage.setItem(LS+"_cur",S.cur||""); }catch(e){} }
+function saveCur(){ try{ localStorage.setItem(lsKey()+"_cur",S.cur||""); }catch(e){} }
 /* A season lives in one Firebase project with no backups and no history. This
    is the way out: plain CSV, one row per player per game, opens in any sheet. */
 function seasonCsv(){
@@ -3242,7 +3284,7 @@ function seasonCsv(){
   return rows.join("\n");
 }
 function downloadCsv(){
-  const name = "warriors-season-"+new Date().toISOString().slice(0,10)+".csv";
+  const name = "warriors-"+seasonName().toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+new Date().toISOString().slice(0,10)+".csv";
   const blob = new Blob([seasonCsv()], {type:"text/csv;charset=utf-8"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -3269,13 +3311,17 @@ function refreshPicker(){
 }
 
 /* ---------------- Firestore ----------------
-   Shape:  teams/{TEAM_ID}                -> { schema, roster:[...] }
+   Shape:  teams/{TEAM_ID}                -> { schema, roster:[...], coaches, seasons:[{id,name,created}] }
            teams/{TEAM_ID}/games/{gameId} -> { date, opp, innings, out, order, slots:{...} }
+           teams/{TEAM_ID}/notes/{noteId}
+   Those three are the Fall 2026 season. Every later season has the same shape
+   one level down: teams/{TEAM_ID}/seasons/{sid} (roster) with games/ and notes/.
    `slots` is a map, not an array, so a single cell can be written by field
    path and merged with someone else's simultaneous edit to a different cell. */
 
 const DELETE = Symbol("delete-field");
-let FS=null, DB=null, teamRef=null, gamesRef=null;
+let FS=null, DB=null, teamRef=null, gamesRef=null, seasonRef=null;
+let seasonSubs=[];            // unsubscribe functions for the current season's listeners
 let ready=false;              // true only after the server has spoken
 let sawTeam=false, sawGames=false;
 let teamExists=null, teamHasRoster=false, serverGames=0;
@@ -3291,51 +3337,153 @@ async function connect(){
     ]);
     FS=fs; DB=fs.getFirestore(initializeApp(FIREBASE_CONFIG));
     teamRef  = fs.doc(DB,"teams",TEAM_ID);
-    gamesRef = fs.collection(DB,"teams",TEAM_ID,"games");
-    notesRef = fs.collection(DB,"teams",TEAM_ID,"notes");
 
+    // Team-wide: coach names and the list of seasons. Never gates readiness.
     fs.onSnapshot(teamRef, snap=>{
-      sawTeam=true; teamExists=snap.exists();
       const d=snap.data();
       if(d && Array.isArray(d.coaches)) S.coaches = d.coaches;
-      if(d && Array.isArray(d.roster) && d.roster.length){
-        S.roster=d.roster; teamHasRoster=true;
+      if(d && Array.isArray(d.seasons)){
+        SEASONS = [LEGACY_SEASON, ...d.seasons.filter(x=>x && x.id && x.id!==LEGACY_SEASON.id)];
+        saveSeasonList();
+        // Follow the newest season unless this device picked one.
+        const newest = SEASONS[SEASONS.length-1].id;
+        if(!seasonPicked() && newest!==SEASON){ switchSeason(newest, false); return; }
+        if(!SEASONS.some(x=>x.id===SEASON)){ switchSeason(newest, false); return; }
       }
-      else if(d && typeof d.state==="string"){
-        // migration from the original single-document format
-        try{
-          const old=JSON.parse(d.state);
-          if(old.roster && old.roster.length) S.roster=old.roster;
-          if(old.games && old.games.length) S.games=old.games;
-          note("migrated "+(old.games||[]).length+" game(s) from the old single-document format");
-        }catch(e){ note("old-format data unreadable: "+codeOf(e)); }
-      }
-      arrive();
+      refreshSeasonPick(); render();
     }, err=>setSync("error","team read failed", err));
 
-    fs.onSnapshot(gamesRef, snap=>{
-      sawGames=true; serverGames=snap.size;
-      if(!snap.empty){
-        S.games = snap.docs.map(d=>Object.assign({id:d.id},d.data()));
-        reorderGames();
-        if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
-      }
-      arrive();
-    }, err=>{
-      setSync("error","games read failed", err);
-      if(codeOf(err)==="permission-denied")
-        note("rules must cover teams/"+TEAM_ID+"/games/** , not just the team document");
-    });
-
-    // Notes are their own stream: a notes failure must not stall the lineup,
-    // and lineup readiness must not gate the thread.
-    fs.onSnapshot(notesRef, snap=>{
-      S.notes = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
-      saveLocal();
-      if(tab==="notes" || unreadNotes()) render();
-    }, err=>setSync("error","notes read failed", err));
-
+    subscribeSeason();
   }catch(e){ setSync("error","could not load Firebase", e); }
+}
+
+/* The current season's three streams: its roster document, its games and its
+   notes. Torn down and reopened when the season changes. */
+function subscribeSeason(){
+  const fs=FS; if(!fs) return;
+  seasonSubs.forEach(u=>{ try{ u(); }catch(e){} });
+  seasonSubs=[];
+  ready=false; sawTeam=false; sawGames=false; teamHasRoster=false; serverGames=0;
+  const sid=SEASON, legacy=isLegacy();
+  seasonRef = legacy ? teamRef : fs.doc(DB,"teams",TEAM_ID,"seasons",sid);
+  gamesRef  = legacy ? fs.collection(DB,"teams",TEAM_ID,"games")
+                     : fs.collection(DB,"teams",TEAM_ID,"seasons",sid,"games");
+  notesRef  = legacy ? fs.collection(DB,"teams",TEAM_ID,"notes")
+                     : fs.collection(DB,"teams",TEAM_ID,"seasons",sid,"notes");
+  const stale = () => sid!==SEASON;     // a late snapshot from a season we left
+
+  seasonSubs.push(fs.onSnapshot(seasonRef, snap=>{
+    if(stale()) return;
+    sawTeam=true; teamExists=snap.exists();
+    const d=snap.data();
+    if(d && Array.isArray(d.roster) && d.roster.length){
+      S.roster=d.roster; teamHasRoster=true;
+    }
+    else if(legacy && d && typeof d.state==="string"){
+      // migration from the original single-document format
+      try{
+        const old=JSON.parse(d.state);
+        if(old.roster && old.roster.length) S.roster=old.roster;
+        if(old.games && old.games.length) S.games=old.games;
+        note("migrated "+(old.games||[]).length+" game(s) from the old single-document format");
+      }catch(e){ note("old-format data unreadable: "+codeOf(e)); }
+    }
+    arrive();
+  }, err=>{
+    setSync("error", seasonName()+" roster read failed", err);
+    if(!legacy && codeOf(err)==="permission-denied")
+      note("rules must cover teams/"+TEAM_ID+"/seasons/** for seasons after Fall 2026");
+  }));
+
+  seasonSubs.push(fs.onSnapshot(gamesRef, snap=>{
+    if(stale()) return;
+    sawGames=true; serverGames=snap.size;
+    // The original season keeps its old guard (an empty answer never wiped the
+    // local cache before the first upload); a newer season simply is the server.
+    if(!snap.empty || !legacy){
+      S.games = snap.docs.map(d=>Object.assign({id:d.id},d.data()));
+      reorderGames();
+      if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
+    }
+    arrive();
+  }, err=>{
+    setSync("error","games read failed", err);
+    if(codeOf(err)==="permission-denied")
+      note("rules must cover teams/"+TEAM_ID+"/** , not just the team document");
+  }));
+
+  // Notes are their own stream: a notes failure must not stall the lineup,
+  // and lineup readiness must not gate the thread.
+  seasonSubs.push(fs.onSnapshot(notesRef, snap=>{
+    if(stale()) return;
+    S.notes = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    saveLocal();
+    if(tab==="notes" || unreadNotes()) render();
+  }, err=>setSync("error","notes read failed", err)));
+}
+
+/* Show another season. Everything season-shaped is swapped: roster, games,
+   notes, the remembered game. Nothing is written until the new season's
+   server data has arrived (ready=false), so a half-loaded season can never
+   overwrite anything. */
+function switchSeason(id, remember){
+  if(!SEASONS.some(x=>x.id===id)) return;
+  if(remember!==false){ try{ localStorage.setItem(LS+"_season", id); }catch(e){} }
+  if(id===SEASON && remember!==false){ refreshSeasonPick(); return; }
+  SEASON=id;
+  S.roster=[]; S.games=[]; S.notes=[];
+  if(!loadLocal() && isLegacy()){ S.roster=SEED_ROSTER.map(p=>({...p})); }
+  try{ S.cur=localStorage.getItem(lsKey()+"_cur")||null; }catch(e){ S.cur=null; }
+  if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
+  reorderGames();
+  noteSel=null; openRow=null;
+  ready=false;
+  refreshSeasonPick(); refreshPicker(); render();
+  if(FS) subscribeSeason(); else ready=true;   // local-only mode has nothing to wait for
+}
+
+/* A new season starts with this season's regular roster and position
+   assignments (call-ups belong to their game and stay behind), no games and
+   no notes. The season document is written before it is listed, so nobody
+   is ever sent to a season that doesn't exist. */
+async function createSeason(name){
+  name = String(name||"").trim().slice(0,30);
+  if(!name) return;
+  if(SEASONS.some(x=>x.name.toLowerCase()===name.toLowerCase())){
+    alert("There's already a season called "+name+"."); return;
+  }
+  const id = "s_"+Date.now().toString(36);
+  const roster = regulars().map(p=>({...p, pos:[...(p.pos||[])]}));
+  const entry = { id, name, created:Date.now() };
+  if(FS && DB){
+    if(!ready){ alert("Still connecting to the database \u2014 try again in a moment."); return; }
+    SYNC.pending++; paintSync();
+    try{
+      await FS.setDoc(FS.doc(DB,"teams",TEAM_ID,"seasons",id), {name, schema:SCHEMA, roster, at:Date.now()});
+      await FS.setDoc(teamRef, {seasons:FS.arrayUnion(entry), at:Date.now()}, {merge:true});
+      SYNC.pending--; SYNC.lastAt=Date.now(); paintSync();
+    }catch(e){
+      SYNC.pending--;
+      setSync("error","new season write failed", e);
+      alert("Couldn't create the season ("+codeOf(e)+"). Nothing was changed."+
+        (codeOf(e)==="permission-denied" ? " The database rules need to allow teams/"+TEAM_ID+"/seasons." : ""));
+      return;
+    }
+  }
+  if(!SEASONS.some(x=>x.id===id)) SEASONS=[...SEASONS, entry];
+  saveSeasonList();
+  // Prime the new season's cache with its roster so it opens with the kids in it.
+  try{ localStorage.setItem(LS+"_s_"+id, JSON.stringify({schema:SCHEMA,roster,games:[],notes:[],coaches:S.coaches})); }catch(e){}
+  switchSeason(id);
+  tab="lineup"; render();
+  note("started season "+name);
+}
+
+function refreshSeasonPick(){
+  const sel=document.getElementById("seasonPick"); if(!sel) return;
+  sel.innerHTML = SEASONS.slice().reverse().map(x=>
+    `<option value="${esc(x.id)}" ${x.id===SEASON?"selected":""}>${esc(x.name)}</option>`).join("")
+    + `<option value="__new">+ New season\u2026</option>`;
 }
 
 /* Seeding is non-destructive: the built-in roster and the 8/22 card are only
@@ -3349,8 +3497,10 @@ function arrive(){
     // Seed or backfill: the guard is "the server is missing this", not merely
     // "the team document is absent" — an older schema left the doc in place
     // with no games under it, and cell writes then had nothing to patch.
-    if(!teamHasRoster){ note("no roster on the server — uploading it"); writeRoster(); }
-    else seedPositionsOnce();   // needs ready=true above, or the write is dropped
+    if(!teamHasRoster){
+      if(S.roster.length){ note("no roster on the server — uploading it"); writeRoster(); }
+    }
+    else if(isLegacy()) seedPositionsOnce();   // needs ready=true above, or the write is dropped
     if(serverGames===0 && S.games.length){
       note("no games on the server — uploading "+S.games.length);
       S.games.forEach(writeGame);
@@ -3396,7 +3546,7 @@ function seedPositionsOnce(){
 
 function writeRoster(){
   if(!DB || !ready) return;
-  track(FS.setDoc(teamRef,{schema:SCHEMA,roster:S.roster,at:Date.now()},{merge:true}),"roster");
+  track(FS.setDoc(seasonRef,{schema:SCHEMA,roster:S.roster,at:Date.now()},{merge:true}),"roster");
 }
 function writeGame(g){
   if(!DB || !ready) return;
@@ -3430,13 +3580,15 @@ function removeGame(gid){
 /* ---------------- Boot ---------------- */
 (function init(){
   loadMe();
-  if(!loadLocal()){
+  loadSeasonPrefs();
+  if(!loadLocal() && isLegacy()){
     S.roster=SEED_ROSTER.map(p=>({...p}));
     S.games=[seedGame()];
   }
-  try{ S.cur=localStorage.getItem(LS+"_cur")||null; }catch(e){}
+  try{ S.cur=localStorage.getItem(lsKey()+"_cur")||null; }catch(e){}
   if(!S.games.some(g=>g.id===S.cur)) S.cur=(S.games[S.games.length-1]||{}).id||null;
   reorderGames();
+  refreshSeasonPick();
   refreshPicker();
   applyRoute();
   connect();

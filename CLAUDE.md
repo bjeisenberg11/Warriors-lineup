@@ -47,7 +47,9 @@ teams/{TEAM_ID}                  { schema, roster: [...], coaches: [...], at }
 teams/{TEAM_ID}/games/{gameId}   { date, opp, ha, innings, out, order, slots: {...},
                                    actual?: {...}, played?, arch?, bslots?, now?, created }
 teams/{TEAM_ID}/notes/{noteId}   { who, text, at, game }
+teams/{TEAM_ID}/seasons/{sid}    { name, schema, roster, at }   + games/ and notes/ under it
 ```
+**Seasons.** Each season has its own roster, games (so trends) and notes. Fall 2026 is the original data, left in place at `teams/{TEAM_ID}` (`LEGACY_SEASON`, id `fall2026`). Later seasons live under `teams/{TEAM_ID}/seasons/{sid}` with the same shape; the team doc's `seasons` array lists them and also still holds `coaches`. `subscribeSeason()` opens the current season's three listeners and `switchSeason()` tears them down, swaps `S`, and keeps `ready=false` until the new season's server data arrives. `createSeason()` copies the regular roster (no call-ups) into the new season doc before adding it to the list. A device shows the newest season unless it picked one (`warriors_lineup_v1_season`); the cache and remembered game are per season (`lsKey()`).
 Slot keys look like `i3_SS` (inning 3, shortstop) or `i2_BN1` (bench). Rules must cover `teams/{TEAM_ID}/**`, including the subcollections. A `permission-denied` on games logs a hint about this.
 
 ### How it works
