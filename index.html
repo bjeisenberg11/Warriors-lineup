@@ -428,6 +428,18 @@ textarea.t{resize:vertical;font-size:16px;line-height:1.4}
 .nmeta span{margin-left:auto}
 .ntext{font-size:15px;line-height:1.4;white-space:pre-wrap;word-break:break-word}
 .ndel{font-size:11px;color:var(--mute);padding:6px 0 0;letter-spacing:.04em;text-transform:uppercase}
+button.note.pick{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+button.note.pick.on{border-color:var(--red);background:var(--red-wash)}
+.nbox{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+  border:1.5px solid var(--steel);border-radius:4px;font-style:normal;font-size:12px;
+  color:#fff;margin-right:2px;flex:none}
+.note.pick.on .nbox{background:var(--red);border-color:var(--red)}
+.nselbtn{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--red);padding:2px 0 2px 8px}
+.nselbar{display:flex;align-items:center;gap:6px;margin:0 0 9px}
+.nselbar span{flex:1;font-size:13px;color:var(--steel)}
+.nselbar .btn{flex:0 0 auto;padding:6px 10px}
+.nselbar .btn[disabled]{opacity:.45}
 
 table.diag{width:100%;border-collapse:collapse;font-size:13px}
 table.diag td{padding:6px 0;border-bottom:1px solid #EEF0F2;font-family:var(--mono);font-size:12px}
@@ -594,7 +606,7 @@ const FIREBASE_CONFIG = {
 try{ if("scrollRestoration" in history) history.scrollRestoration = "manual"; }catch(e){}
 
 const TEAM_ID = "warriors-k7m2q9x4";
-const BUILD  = "2026-10-09.1907";
+const BUILD  = "2026-10-11.0031";
 const SCHEMA = 1;
 
 /* ==== LOGIC:BEGIN ====  (extracted verbatim by warriors-tests.js — no DOM in here) */
@@ -1742,10 +1754,14 @@ function addNote(text){
   S.notes = [n, ...(S.notes||[])];
   markNotesRead(); commit(); writeNote(n);
 }
-function dropNote(id){
-  S.notes = (S.notes||[]).filter(n=>n.id!==id);
-  commit(); removeNote(id);
+function dropNote(id){ dropNotes([id]); }
+function dropNotes(ids){
+  const gone = new Set(ids);
+  S.notes = (S.notes||[]).filter(n=>!gone.has(n.id));
+  commit(); ids.forEach(removeNote);
 }
+/* Select mode on the thread: null when off, else the ids ticked so far. */
+let noteSel = null;
 const whenStr = ms => {
   if(!ms) return "";
   const d=new Date(ms), now=new Date();
@@ -2526,16 +2542,29 @@ function viewNotes(){
     </div>`;
   }
   const list = sortedNotes();
+  if(noteSel) noteSel = new Set([...noteSel].filter(id=>list.some(n=>n.id===id)));
+  /* Any coach can delete any note: there are no accounts, so "mine" is only
+     whatever name this device picked. In select mode the whole note is the
+     tap target. */
   const items = list.map(n=>{
     const mine = n.who===ME;
     const g = S.games.find(x=>x.id===n.game);
-    return `<div class="note ${mine?"mine":""}">
-      <div class="nmeta"><b>${esc(n.who)}</b>${g?" · "+fmtDate(g.date):""}
+    const inner = `<div class="nmeta">${noteSel?`<i class="nbox">${
+        noteSel.has(n.id)?"\u2713":""}</i>`:""}<b>${esc(n.who)}</b>${g?" · "+fmtDate(g.date):""}
         <span>${whenStr(n.at)}</span></div>
-      <div class="ntext">${esc(n.text)}</div>
-      ${mine?`<button class="ndel" data-delnote="${n.id}">Delete</button>`:""}
-    </div>`;
+      <div class="ntext">${esc(n.text)}</div>`;
+    return noteSel
+      ? `<button class="note pick ${mine?"mine":""} ${noteSel.has(n.id)?"on":""}" data-picknote="${n.id}">${inner}</button>`
+      : `<div class="note ${mine?"mine":""}">${inner}
+      <button class="ndel" data-delnote="${n.id}">Delete</button></div>`;
   }).join("");
+  const nSel = noteSel ? noteSel.size : 0;
+  const selBar = noteSel ? `<div class="nselbar">
+      <span>${nSel} selected</span>
+      <button class="btn ghost" id="noteSelAll">${nSel===list.length?"None":"All"}</button>
+      <button class="btn primary" id="noteSelDel" ${nSel?"":"disabled"}>Delete${nSel?" "+nSel:""}</button>
+      <button class="btn ghost" id="noteSelOff">Cancel</button>
+    </div>` : "";
 
   return `<div class="card">
     <div class="h">Notes <span class="rule"></span>
@@ -2550,7 +2579,9 @@ function viewNotes(){
   </div>
   <div class="card">
     <div class="h">Thread <span class="rule"></span>
-      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${list.length}</span></div>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mute)">${list.length}</span>
+      ${list.length && !noteSel?`<button class="nselbtn" id="noteSelOn">Select</button>`:""}</div>
+    ${selBar}
     ${items || `<div class="empty">Nothing yet. First note goes at the top.</div>`}
   </div>`;
 }
@@ -2998,7 +3029,28 @@ document.addEventListener("click",e=>{
     addNote(v);
   }
   else if(b.dataset.delnote){
-    if(confirm("Delete this note?")) dropNote(b.dataset.delnote);
+    const n = (S.notes||[]).find(x=>x.id===b.dataset.delnote);
+    const whose = n && n.who && n.who!==ME ? n.who+"'s note" : "this note";
+    if(confirm("Delete "+whose+"? It disappears for everyone.")) dropNote(b.dataset.delnote);
+  }
+  else if(b.id==="noteSelOn"){ noteSel = new Set(); render(); }
+  else if(b.id==="noteSelOff"){ noteSel = null; render(); }
+  else if(b.dataset.picknote){
+    const id = b.dataset.picknote;
+    if(noteSel.has(id)) noteSel.delete(id); else noteSel.add(id);
+    render();
+  }
+  else if(b.id==="noteSelAll"){
+    const all = sortedNotes().map(n=>n.id);
+    noteSel = noteSel.size===all.length ? new Set() : new Set(all);
+    render();
+  }
+  else if(b.id==="noteSelDel"){
+    const ids = [...noteSel];
+    if(!ids.length) return;
+    if(!confirm("Delete "+ids.length+" note"+(ids.length===1?"":"s")+"? They disappear for everyone.")) return;
+    noteSel = null;
+    dropNotes(ids);
   }
   else if(b.dataset.split){
     const [i,pos] = b.dataset.split.split("_");
